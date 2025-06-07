@@ -1,13 +1,13 @@
 import torch
 import triton
 
-from benchmarks.utils import Providers, eval_tflops
+from benchmarks.utils import QUANTILES, Providers, eval_tflops
 from triturus.vadd import vadd
 
 CONFIGS = [
     triton.testing.Benchmark(
         x_names=["n"],
-        x_vals=[16 * i for i in range(2, 64)],
+        x_vals=[384 * i for i in range(2, 17)],
         line_arg="provider",
         line_vals=[Providers.CUBLAS, Providers.TRITURUS],
         line_names=[Providers.CUBLAS, Providers.TRITURUS],
@@ -20,13 +20,18 @@ CONFIGS = [
 
 @triton.testing.perf_report(CONFIGS)
 def benchmark_vadd(n, provider):
-    x = torch.rand(n)
-    y = torch.rand(n)
+    device = torch.device("cuda")
+    x = torch.rand(n, device=device)
+    y = torch.rand(n, device=device)
     match provider:
         case Providers.CUBLAS:
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: x + y)
+            ms, min_ms, max_ms = triton.testing.do_bench(
+                lambda: x + y, quantiles=QUANTILES
+            )
         case Providers.TRITURUS:
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: vadd(x, y))
+            ms, min_ms, max_ms = triton.testing.do_bench(
+                lambda: vadd(x, y), quantiles=QUANTILES
+            )
         case _:
             assert False, provider
 

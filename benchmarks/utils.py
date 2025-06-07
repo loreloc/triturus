@@ -1,9 +1,9 @@
-from enum import Enum
-
-
-class Providers(Enum):
+class Providers:
     CUBLAS = "cuBLAS"
     TRITURUS = "triturus"
+
+
+QUANTILES = [0.5, 0.1, 0.9]
 
 
 def eval_tflops(nflops: int, ms: float) -> float:
