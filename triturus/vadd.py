@@ -5,9 +5,9 @@ import triton.language as tl
 
 @triton.jit
 def _ker_vadd(
-    x_ptr: triton.language.pointer_type,  # A pointer to n-dimensional vector
-    y_ptr: triton.language.pointer_type,
-    r_ptr: triton.language.pointer_type,
+    x_ptr,  # A pointer to n-dimensional vector
+    y_ptr,
+    r_ptr,
     n: int,  # The size of the input and output vectors
     BLOCK_SIZE: tl.constexpr,  # The block size
 ):
