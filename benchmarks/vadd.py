@@ -2,6 +2,7 @@ import torch
 import triton
 
 from benchmarks.utils import QUANTILES, Providers, eval_tflops
+from triturus.utils import ensure_reproducibility
 from triturus.vadd import vadd
 
 CONFIGS = [
@@ -20,9 +21,9 @@ CONFIGS = [
 
 @triton.testing.perf_report(CONFIGS)
 def benchmark_vadd(n, provider):
-    device = torch.device("cuda")
-    x = torch.rand(n, device=device)
-    y = torch.rand(n, device=device)
+    ensure_reproducibility()
+    x = torch.rand(n)
+    y = torch.rand(n)
     match provider:
         case Providers.CUBLAS:
             ms, min_ms, max_ms = triton.testing.do_bench(

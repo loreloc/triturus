@@ -34,9 +34,9 @@ def vadd(x: torch.Tensor, y: torch.Tensor, *, block_size: int = 32) -> torch.Ten
     n = x.shape[0]
     # Allocate the result tensor, on the same device
     r = torch.empty_like(x)
-    # The callable returning the number of kernel instances for each axis
+    # The number of kernel instances for each axis
     # In this case is the ceiling division of the vector sizes (n) and the block size
-    grid = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+    grid = (triton.cdiv(n, block_size),)
     # Launch the kernel and use the given block size
     _ker_vadd[grid](x, y, r, n, BLOCK_SIZE=block_size)
     return r
