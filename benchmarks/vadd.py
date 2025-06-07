@@ -24,16 +24,12 @@ def benchmark_vadd(n, provider):
     y = torch.rand(n)
     match provider:
         case Providers.CUBLAS:
-            ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: x + y
-            )
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: x + y)
         case Providers.TRITURUS:
-            ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: vadd(x, y)
-            )
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: vadd(x, y))
         case _:
             assert False, provider
-            
+
     return eval_tflops(n, ms), eval_tflops(n, min_ms), eval_tflops(n, max_ms)
 
 

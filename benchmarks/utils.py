@@ -2,8 +2,8 @@ from enum import Enum
 
 
 class Providers(Enum):
-    CUBLAS = 'cuBLAS'
-    TRITURUS = 'triturus'
+    CUBLAS = "cuBLAS"
+    TRITURUS = "triturus"
 
 
 def eval_tflops(nflops: int, ms: float) -> float:
