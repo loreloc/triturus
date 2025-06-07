@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools >= 64.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["triturus"]
+
+[project]
+name = "triturus"
+version = "0.0.1"
+description = "A minimal playground to learn and explore triton"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text="GPLv3" }
+keywords = ["triton"]
+authors = [{ name="loreloc" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "torch==2.7.1",
+  "triton==3.3.1",
+  "numpy",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "coverage",
+  "pandas",
+  "matplotlib"
+]
+
+[tool.pytest.ini_options]
+pythonpath = "."
+testpaths = ["tests/*"]
+markers = [
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+]
+
+[tool.ruff.lint]
+select = [
+  "I",  # isort
+]
+ignore = [
+  "E731",  # Do not assign a `lambda` expression, use a `def`
+]
+
+[tool.coverage.run]
+branch = true
+source = ["triturus"]
+
+[tool.coverage.report]
+show_missing = true
