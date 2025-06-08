@@ -29,7 +29,9 @@ def _ker_vadd(
 
 
 def vadd(x: torch.Tensor, y: torch.Tensor, *, block_size: int = 32) -> torch.Tensor:
-    assert len(x.shape) == len(y.shape) == 1 and x.shape == y.shape
+    assert len(x.shape) == len(y.shape) == 1
+    assert x.shape == y.shape
+    assert x.dtype == y.dtype
     assert x.device == y.device
     n = x.shape[0]
     # Allocate the result tensor, on the same device
