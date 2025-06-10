@@ -1,3 +1,4 @@
+import os
 import random
 
 import numpy as np
@@ -5,7 +6,10 @@ import torch
 
 
 def ensure_reproducibility(
-    *, seed: int = 42, device: torch.device | int | str | None = None
+    *,
+    determinism: bool = False,
+    seed: int = 42,
+    device: torch.device | int | str | None = None,
 ):
     random.seed(seed)
     np.random.seed(seed)
@@ -15,3 +19,7 @@ def ensure_reproducibility(
             torch.set_default_device("cuda")
     else:
         torch.set_default_device(device)
+    if determinism:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        torch.backends.cudnn.benchmark = False
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
