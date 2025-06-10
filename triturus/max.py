@@ -28,24 +28,24 @@ def _ker_vmax(
         pass
     # Read and conditionally update the maximum and its index
     m_cur = tl.load(m_ptr)
-    if m >= m_cur:
+    if m > m_cur:
         tl.store(m_ptr, m)
         tl.store(p_ptr, pid * BLOCK_SIZE + p)
     # Release the lock
-    tl.atomic_xchg(lock_ptr, 0)
+    tl.store(lock_ptr, 0)
 
 
-def vmax(x: torch.Tensor, *, block_size: int = 64) -> tuple[torch.Tensor, torch.Tensor]:
+def vmax(
+    x: torch.Tensor, *, block_size: int = 128
+) -> tuple[torch.Tensor, torch.Tensor]:
     assert len(x.shape) == 1
+    assert x.shape[0] > 0
     n = x.shape[0]
     # Allocate the lock
-    lock = torch.zeros(size=(1,), dtype=torch.int32, device=x.device)
+    lock = torch.zeros(1, dtype=torch.int32, device=x.device)
     # Allocate the maximum and its index tensors, on the same device
-    min_value = (
-        -float("inf") if torch.is_floating_point(x) else torch.iinfo(x.dtype).min
-    )
-    m = torch.full(size=(1,), fill_value=min_value, dtype=x.dtype, device=x.device)
-    p = torch.empty(size=(1,), dtype=torch.int64, device=x.device)
+    m = x[0]
+    p = torch.zeros(1, dtype=torch.int64, device=x.device)
     # The number of kernel instances for each axis
     # In this case is the ceiling division of the vector size (n) and the block size
     grid = (triton.cdiv(n, block_size),)
