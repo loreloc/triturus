@@ -47,7 +47,7 @@ def _ker_mm(
         a = tl.load(a_ptrs, mask=a_mask, other=0.0)
         b = tl.load(b_ptrs, mask=b_mask, other=0.0)
         # Compute the dot product of blocks
-        acc = tl.dot(a, b, acc=acc, input_precision='ieee')
+        acc = tl.dot(a, b, acc=acc, input_precision="ieee")
         # Move the pointers for A along axis=1 by the block size
         # Move the pointers for B along axis=0 by the block size
         a_ptrs += BLOCK_SIZE * a_str1
