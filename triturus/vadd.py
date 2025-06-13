@@ -1,8 +1,17 @@
+import itertools
+
 import torch
 import triton
 import triton.language as tl
 
 
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_SIZE": bs}, num_warps=nw, num_stages=nw)
+        for bs, nw in itertools.product([64, 128, 256, 512], [2, 4, 8])
+    ],
+    key=["n"],
+)
 @triton.jit
 def _ker_vadd(
     x_ptr,  # A pointer to n-dimensional vector
@@ -28,7 +37,7 @@ def _ker_vadd(
     tl.store(r_ptr + offs, r, mask=mask)
 
 
-def vadd(x: torch.Tensor, y: torch.Tensor, *, block_size: int = 32) -> torch.Tensor:
+def vadd(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     assert len(x.shape) == len(y.shape) == 1
     assert x.shape == y.shape
     assert x.dtype == y.dtype
@@ -38,7 +47,7 @@ def vadd(x: torch.Tensor, y: torch.Tensor, *, block_size: int = 32) -> torch.Ten
     r = torch.empty_like(x)
     # The number of kernel instances for each axis
     # In this case is the ceiling division of the vector sizes (n) and the block size
-    grid = (triton.cdiv(n, block_size),)
+    grid = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
     # Launch the kernel and use the given block size
-    _ker_vadd[grid](x, y, r, n, BLOCK_SIZE=block_size)
+    _ker_vadd[grid](x, y, r, n)
     return r

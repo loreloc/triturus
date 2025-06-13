@@ -1,8 +1,17 @@
+import itertools
+
 import torch
 import triton
 import triton.language as tl
 
 
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_SIZE": bs}, num_warps=nw, num_stages=ns)
+        for bs, nw, ns in itertools.product([32, 64, 128], [2, 4, 8], [3, 4, 5])
+    ],
+    key=["m", "k", "n"],
+)
 @triton.jit
 def _ker_mm(
     a_ptr,  # A pointer to a M x K matrix (A)
@@ -47,7 +56,7 @@ def _ker_mm(
         a = tl.load(a_ptrs, mask=a_mask, other=0.0)
         b = tl.load(b_ptrs, mask=b_mask, other=0.0)
         # Compute the dot product of blocks
-        acc = tl.dot(a, b, acc=acc, input_precision="ieee")
+        acc = tl.dot(a, b, acc=acc)
         # Move the pointers for A along axis=1 by the block size
         # Move the pointers for B along axis=0 by the block size
         a_ptrs += BLOCK_SIZE * a_str1
@@ -60,7 +69,7 @@ def _ker_mm(
     tl.store(c_ptrs, acc, mask=c_mask)
 
 
-def mm(a: torch.Tensor, b: torch.Tensor, *, block_size: int = 32) -> torch.Tensor:
+def mm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     assert len(a.shape) == len(b.shape) == 2
     assert a.shape[1] == b.shape[0]
     assert a.dtype == b.dtype
@@ -71,7 +80,10 @@ def mm(a: torch.Tensor, b: torch.Tensor, *, block_size: int = 32) -> torch.Tenso
     # In this case it is a tuple of two elements:
     #   the ceiling division of the number of rows in A;
     #   the ceiling division of the number of columns in B.
-    grid = (triton.cdiv(a.shape[0], block_size), triton.cdiv(b.shape[1], block_size))
+    grid = lambda meta: (
+        triton.cdiv(a.shape[0], meta["BLOCK_SIZE"]),
+        triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),
+    )
     # Launch the kernel and use the given block size
     _ker_mm[grid](
         a,
@@ -86,6 +98,5 @@ def mm(a: torch.Tensor, b: torch.Tensor, *, block_size: int = 32) -> torch.Tenso
         a.shape[0],
         a.shape[1],
         b.shape[1],
-        BLOCK_SIZE=block_size,
     )
     return c
