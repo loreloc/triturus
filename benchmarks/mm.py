@@ -8,7 +8,7 @@ from triturus.utils import ensure_reproducibility
 CONFIGS = [
     triton.testing.Benchmark(
         x_names=["m", "k", "n"],
-        x_vals=[72 * i for i in range(1, 65)],
+        x_vals=[144 * i for i in range(1, 33)],
         line_arg="provider",
         line_vals=[Providers.CUBLAS, Providers.TRITURUS],
         line_names=[Providers.CUBLAS, Providers.TRITURUS],
@@ -36,7 +36,7 @@ def benchmark_vadd(m, k, n, provider) -> tuple[float, float, float]:
         case _:
             assert False, provider
 
-    nflops = m * n * k
+    nflops = 2 * m * n * k
     return (
         eval_tflops(nflops, ms),
         eval_tflops(nflops, min_ms),

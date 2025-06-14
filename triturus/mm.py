@@ -5,10 +5,42 @@ import triton
 import triton.language as tl
 
 
+# Automatically tune the block size and the number of warps,
+# for different combinations of the matrix dimensions m, k, n.
+#
+# In triton, we typically break our kernel into thread blocks, and each of them
+# will be run on a streaming multiprocessor (SM). The execution of our kernel is
+# complete when all thread blocks have been executed. Since the number of
+# thread blocks can be smaller or larger than the number of SMs, a single SM
+# executes zero, one, or more than one thread blocks.
+#
+# In particular, a thread block is a collection of warps, each of them
+# consisting of a fixed number of threads. For instance, if each warp consists
+# of 32 threads and the computation to be done within a thread block requires 10
+# threads, then one warp is launched. Similarly, if we need 40 threads, then two
+# warps are launched. The results of the threads in warp that are not needed are
+# simply thrown away.
+#
+# In general, a larger block size means a higher number of warps. The maximum
+# number of warps is here automatically tuned together with the block size.
+# If the maximum number of warps we set is less than the number of warps that
+# would be required, then the computation done by a single thread must increase,
+# i.e., by adding loops in a thread during compilation.
+#
+# Crucially, different combinations of block size and number of warps might
+# mean different memory access orderings, which in turn has an impact on
+# the resulting performances. More specifically, multiple warps can be executed
+# concurrently in a SM. However, context switches of threads across different
+# warps typically occur whenever a certain thread is waiting to access the
+# memory. While this is useful to reduce time wasted on waiting the memory, it
+# can significantly increase the amount of cache required as to save the context
+# before switching to a different thread. As the amount of cache is limited,
+# the number of warps need to be carefully tuned.
+#
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_SIZE": bs}, num_warps=nw, num_stages=ns)
-        for bs, nw, ns in itertools.product([32, 64, 128], [2, 4, 8], [3, 4, 5])
+        triton.Config({"BLOCK_SIZE": bs}, num_warps=nw)
+        for bs, nw in itertools.product([32, 64, 128], [2, 4, 8])
     ],
     key=["m", "k", "n"],
 )
