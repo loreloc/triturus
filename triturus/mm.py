@@ -73,6 +73,8 @@ def _ker_mm(
     # b_offs1      = [0..32]  [32..64]  [ 0..32]  [32..64] ...
     a_offs0 = pid_i * BLOCK_SIZE + block_idx
     b_offs1 = pid_j * BLOCK_SIZE + block_idx
+    a_block_mask0 = a_offs0[:, None] < m
+    b_block_mask1 = b_offs1[None, :] < n
     # Multiply by the strides for A and B along axes 0 and 1 as to retrieve the pointers
     a_ptrs = a_ptr + a_offs0[:, None] * a_str0 + block_idx[None, :] * a_str1
     b_ptrs = b_ptr + block_idx[:, None] * b_str0 + b_offs1[None, :] * b_str1
@@ -82,11 +84,9 @@ def _ker_mm(
     for h in range(num_blocks):
         # Handle out of bounds using masks
         mask = (h * BLOCK_SIZE + block_idx) < k
-        a_mask = (a_offs0[:, None] < m) & mask[None, :]
-        b_mask = (b_offs1[None, :] < n) & mask[:, None]
         # Since the accumulator has fixed size, we load 0.0 whenever we are out of bounds
-        a = tl.load(a_ptrs, mask=a_mask, other=0.0)
-        b = tl.load(b_ptrs, mask=b_mask, other=0.0)
+        a = tl.load(a_ptrs, mask=a_block_mask0 & mask[None, :], other=0.0)
+        b = tl.load(b_ptrs, mask=b_block_mask1 & mask[:, None], other=0.0)
         # Compute the dot product of blocks
         acc = tl.dot(a, b, acc=acc, input_precision="ieee")
         # Move the pointers for A along axis=1 by the block size
@@ -95,10 +95,8 @@ def _ker_mm(
         b_ptrs += BLOCK_SIZE * b_str0
     # Compute the pointers where to store the accumulator values
     c_ptrs = c_ptr + a_offs0[:, None] * c_str0 + b_offs1[None, :] * c_str1
-    # Handle out of bounds using a mask
-    c_mask = (a_offs0[:, None] < m) & (b_offs1[None, :] < n)
     # Store the block accumulator
-    tl.store(c_ptrs, acc, mask=c_mask)
+    tl.store(c_ptrs, acc, mask=a_block_mask0 & b_block_mask1)
 
 
 def mm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
