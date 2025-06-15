@@ -8,7 +8,8 @@ from triturus.utils import ensure_reproducibility
 CONFIGS = [
     triton.testing.Benchmark(
         x_names=["m", "k", "n"],
-        x_vals=[144 * i for i in range(1, 33)],
+        x_vals=[256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 10240],
+        x_log=True,
         line_arg="provider",
         line_vals=[Providers.CUBLAS, Providers.TRITURUS],
         line_names=[Providers.CUBLAS, Providers.TRITURUS],
@@ -20,7 +21,7 @@ CONFIGS = [
 
 
 @triton.testing.perf_report(CONFIGS)
-def benchmark_vadd(m, k, n, provider) -> tuple[float, float, float]:
+def benchmark_mm(m, k, n, provider) -> tuple[float, float, float]:
     ensure_reproducibility()
     a = torch.rand(m, k)
     b = torch.rand(k, n)
@@ -36,7 +37,7 @@ def benchmark_vadd(m, k, n, provider) -> tuple[float, float, float]:
         case _:
             assert False, provider
 
-    nflops = 2 * m * n * k
+    nflops = m * n * (2 * k - 1)
     return (
         eval_tflops(nflops, ms),
         eval_tflops(nflops, min_ms),
@@ -44,4 +45,4 @@ def benchmark_vadd(m, k, n, provider) -> tuple[float, float, float]:
     )
 
 
-benchmark_vadd.run(show_plots=True, print_data=True)
+benchmark_mm.run(show_plots=True, print_data=True)
