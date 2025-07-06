@@ -25,7 +25,7 @@ def _ker_vmax(
     # Compute the mask corresponding to valid data entries
     mask = offs < n
     # Load a block of the input vectors to the DRAM
-    x = tl.load(x_ptr + offs, mask=mask)
+    x = tl.load(x_ptr + offs, mask=mask, other=-float("inf"))
     # Compute the maximum and its index in the block
     m, p = tl.max(x, axis=0, return_indices=True)
     # Store the maximum and the index in the working arrays
