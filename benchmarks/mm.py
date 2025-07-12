@@ -8,7 +8,7 @@ from triturus.utils import ensure_reproducibility
 CONFIGS = [
     triton.testing.Benchmark(
         x_names=["m", "k", "n"],
-        x_vals=[256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 10240],
+        x_vals=[48 + 2**i for i in list(range(4, 15))],
         x_log=True,
         line_arg="provider",
         line_vals=[Providers.CUBLAS, Providers.TRITURUS],

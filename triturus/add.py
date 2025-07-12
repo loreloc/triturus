@@ -28,7 +28,7 @@ def _ker_vadd(
     tl.store(r_ptr + offs, r, mask=mask)
 
 
-def vadd(x: torch.Tensor, y: torch.Tensor, *, block_size: int = 64) -> torch.Tensor:
+def vadd(x: torch.Tensor, y: torch.Tensor, *, block_size: int = 256) -> torch.Tensor:
     assert len(x.shape) == len(y.shape) == 1
     assert x.shape == y.shape
     assert x.dtype == y.dtype

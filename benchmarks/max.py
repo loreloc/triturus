@@ -2,13 +2,13 @@ import torch
 import triton
 
 from benchmarks.utils import QUANTILES, Providers, eval_tflops
-from triturus.max import vmax
+from triturus.max import vamax, vmax
 from triturus.utils import ensure_reproducibility
 
 CONFIGS = [
     triton.testing.Benchmark(
         x_names=["n"],
-        x_vals=[400 * i for i in range(2, 17)],
+        x_vals=[48 + 2**i for i in list(range(4, 23, 2))],
         line_arg="provider",
         line_vals=[Providers.CUBLAS, Providers.TRITURUS],
         line_names=[Providers.CUBLAS, Providers.TRITURUS],

@@ -1,10 +1,10 @@
 import torch
 
-from triturus.vadd import vadd
+from triturus.add import vadd
 
 
 def test_vadd():
-    n = 1800
+    n = 2000
     x = torch.rand(n)
     y = torch.rand(n)
     gt = x + y
