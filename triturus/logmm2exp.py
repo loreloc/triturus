@@ -5,9 +5,6 @@ import triton
 import triton.language as tl
 
 
-@triton.autotune(
-    configs=[triton.Config({"BLOCK_SIZE": bs}) for bs in [16, 32, 64]], key=["k", "n"]
-)
 @triton.jit
 def _ker_colsmax(
     b_ptr,  # A pointer to a K x N matrix (B)
@@ -92,7 +89,6 @@ def _ker_logmm2exp(
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
-    input_precision = "tf32" if USE_TF32 else "ieee"
     for h in range(num_blocks):
         # Handle out of bounds using masks
         block_mask = block_idx < k - h * BLOCK_SIZE
@@ -103,7 +99,7 @@ def _ker_logmm2exp(
         # But first subtract the maximum values for numerical stability
         exp_b_block = tl.exp(b_block - max_block)
         # Compute the dot product of blocks
-        acc = tl.dot(a_block, exp_b_block, acc=acc, input_precision=input_precision)
+        acc = tl.dot(a_block, exp_b_block, acc=acc, input_precision="tf32" if USE_TF32 else "ieee")
         # Move the pointers for A along axis=1 by the block size
         # Move the pointers for B along axis=0 by the block size
         a_ptrs += BLOCK_SIZE * a_str1
@@ -133,7 +129,8 @@ def logmm2exp(
     # We take it as the next power of 2 of the number of rows in B
     max_block_size = triton.next_power_of_2(b.shape[0])
     # Launch the kernel to compute the maximum values of the columns of B first
-    grid_colsmax = lambda meta: (triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]))
+    block_size = 16
+    grid_colsmax = lambda meta: (triton.cdiv(b.shape[1], block_size),)
     _ker_colsmax[grid_colsmax](
         b,
         m,
@@ -142,6 +139,7 @@ def logmm2exp(
         b.shape[0],
         b.shape[1],
         MAX_BLOCK_SIZE=max_block_size,
+        BLOCK_SIZE=block_size
     )
     # Launch the kernel
     grid_logmm2exp = lambda meta: (
