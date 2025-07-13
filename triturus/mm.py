@@ -93,7 +93,7 @@ def _ker_mm(
     b_ptrs = b_ptr + block_idx[:, None] * b_str0 + b_offs1[None, :] * b_str1
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
-    # Compute and acucmulate the dot products of block matrices
+    # Compute and accumulate the dot products of block matrices
     for h in range(num_blocks):
         # Handle out of bounds using masks
         block_mask = block_idx < k - h * BLOCK_SIZE
