@@ -18,6 +18,7 @@ def _ker_vamax(
     # pid  =  0       1       2       3       ...
     # offs = [0..32][32..64][64..96][96..128] ...
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    offs = tl.max_contiguous(offs, BLOCK_SIZE)
     # Compute the mask corresponding to valid data entries
     mask = offs < n
     # Load a block of the input vectors to the DRAM
@@ -39,6 +40,7 @@ def _ker_vamax_reduce(
     pid = tl.program_id(axis=0)
     # Compute the offsets of each block
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    offs = tl.max_contiguous(offs, BLOCK_SIZE)
     # Compute the mask corresponding to valid data entries
     mask = offs * STRIDE < n
     # Load a block of the input vectors to the DRAM
@@ -90,6 +92,7 @@ def _ker_vmax(
     # pid  =  0       1       2       3       ...
     # offs = [0..32][32..64][64..96][96..128] ...
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    offs = tl.max_contiguous(offs, BLOCK_SIZE)
     # Compute the mask corresponding to valid data entries
     mask = offs < n
     # Load a block of the input vectors to the DRAM
@@ -115,6 +118,7 @@ def _ker_vmax_reduce(
     # pid  =  0       1       2       3       ...
     # offs = [0..32][32..64][64..96][96..128] ...
     offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    offs = tl.max_contiguous(offs, BLOCK_SIZE)
     # Compute the mask corresponding to valid data entries
     mask = offs * STRIDE < n
     # Load a block of the input vectors to the DRAM

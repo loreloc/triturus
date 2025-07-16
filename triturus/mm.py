@@ -60,6 +60,7 @@ def _ker_mm(
     n: int,
     BLOCK_SIZE: tl.constexpr,  # The block size
     BLOCK_SIZE_K: tl.constexpr,  # The block size along the dimension to contract
+    USE_TF32: tl.constexpr,  # Whether to use tf32 or ieee precision
 ):
     # Retrieve the program ids on a 2D grid
     pid_i = tl.program_id(axis=0)
@@ -91,7 +92,9 @@ def _ker_mm(
         a_block = tl.load(a_ptrs, mask=block_mask0[:, None] & mask[None, :], other=0.0)
         b_block = tl.load(b_ptrs, mask=mask[:, None] & block_mask1[None, :], other=0.0)
         # Compute the dot product of blocks
-        acc = tl.dot(a_block, b_block, acc=acc, input_precision="ieee")
+        acc = tl.dot(
+            a_block, b_block, acc=acc, input_precision="tf32" if USE_TF32 else "ieee"
+        )
         # Move the pointers for A along axis=1 by the block size
         # Move the pointers for B along axis=0 by the block size
         a_ptrs += BLOCK_SIZE_K * a_str1
@@ -102,7 +105,7 @@ def _ker_mm(
     tl.store(c_ptrs, acc, mask=block_mask0[:, None] & block_mask1[None, :])
 
 
-def mm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+def mm(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Tensor:
     assert len(a.shape) == len(b.shape) == 2
     assert a.shape[1] == b.shape[0]
     assert a.dtype == b.dtype
@@ -132,5 +135,6 @@ def mm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         a.shape[0],
         a.shape[1],
         b.shape[1],
+        USE_TF32=use_tf32,
     )
     return c

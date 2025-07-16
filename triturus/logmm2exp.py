@@ -5,6 +5,13 @@ import triton
 import triton.language as tl
 
 
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_SIZE": bs, "BLOCK_SIZE_K": bsk}, num_warps=nw)
+        for bs, bsk, nw in itertools.product([64, 128, 256], [64, 128], [4, 8])
+    ],
+    key=["k", "n"],
+)
 @triton.jit
 def _ker_colsmax(
     b_ptr,  # A pointer to a K x N matrix (B)
@@ -14,33 +21,38 @@ def _ker_colsmax(
     k: int,
     n: int,
     BLOCK_SIZE: tl.constexpr,  # The block size
-    MAX_BLOCK_SIZE: tl.constexpr,  # The block size to compute the maximum values. It is equal to next_power_of_2(k).
+    BLOCK_SIZE_K: tl.constexpr,  # The block size along the dimension to contract
 ):
     # Retrieve the program ids on a 1D grid
     pid_i = tl.program_id(axis=0)
     # Compute the maximum values of B along axis=0
     block_idx = tl.arange(0, BLOCK_SIZE)
-    max_block_idx = tl.arange(0, MAX_BLOCK_SIZE)
+    block_idx_k = tl.arange(0, BLOCK_SIZE_K)
+    num_blocks = tl.cdiv(k, BLOCK_SIZE)
     # Compute the pointers to the starting blocks of B (along axis=1)
-    # Note that the offsets are taken modulus the number of columns of B
-    # as to avoid going out of bounds
-    b_offs1 = (pid_i * BLOCK_SIZE + block_idx) % n
-    b_cols_ptrs = b_ptr + max_block_idx[:, None] * b_str0 + b_offs1[None, :] * b_str1
-    block_rows_mask = max_block_idx < k
-    block_cols_mask = (pid_i * BLOCK_SIZE + block_idx) < n
-    # Read the block columns and reduce to the maximum values
-    mask = block_rows_mask[:, None] & block_cols_mask[None, :]
-    block_cols = tl.load(b_cols_ptrs, mask=mask, other=float("-inf"))
-    max_block = tl.max(block_cols, axis=0)
+    b_offs = pid_i * BLOCK_SIZE + block_idx
+    b_offs = tl.max_contiguous(b_offs, BLOCK_SIZE)
+    block_mask1 = b_offs < n
+    b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs[None, :] * b_str1
+    # Compute the number of blocks along axis=0 and reduce to the maximum values
+    max_block = tl.full((BLOCK_SIZE,), value=float("-inf"), dtype=tl.float32)
+    for h in range(num_blocks):
+        # Read the block columns and reduce to the maximum values
+        mask = block_idx_k + h * BLOCK_SIZE_K < k
+        block = tl.load(
+            b_ptrs, mask=mask[:, None] & block_mask1[None, :], other=float("-inf")
+        )
+        max_block = tl.maximum(max_block, tl.max(block, axis=0))
+        b_ptrs += BLOCK_SIZE_K * b_str0
     # Store the maximum values
-    m_ptrs = m_ptr + pid_i * BLOCK_SIZE + block_idx
-    tl.store(m_ptrs, max_block, mask=block_cols_mask)
+    m_ptrs = m_ptr + b_offs
+    tl.store(m_ptrs, max_block, mask=block_mask1)
 
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_SIZE": bs, "GROUP_SIZE": 8}, num_warps=nw)
-        for bs, nw in itertools.product([16, 32, 64], [2, 4, 8])
+        triton.Config({"BLOCK_SIZE": bs, "BLOCK_SIZE_K": bsk}, num_warps=nw)
+        for bs, bsk, nw in itertools.product([64, 128, 256], [32, 64], [4, 8])
     ],
     key=["m", "k", "n"],
 )
@@ -60,30 +72,29 @@ def _ker_logmm2exp(
     k: int,
     n: int,
     BLOCK_SIZE: tl.constexpr,  # The block size
-    GROUP_SIZE: tl.constexpr,  # The group size for swizzling
+    BLOCK_SIZE_K: tl.constexpr,  # The block size along the dimension to contract
     USE_TF32: tl.constexpr,  # Whether to use tf32 or ieee precision
 ):
     # Retrieve the program ids on a 2D grid
     pid_i = tl.program_id(axis=0)
     pid_j = tl.program_id(axis=1)
-    # Swizzle program id indices as to better exploit caching
-    num_pid_i = tl.num_programs(axis=0)
-    num_pid_j = tl.num_programs(axis=1)
-    pid_i, pid_j = tl.swizzle2d(pid_i, pid_j, num_pid_i, num_pid_j, GROUP_SIZE)
     # Compute the number of blocks to multiply and accumulate, and the block indices
-    num_blocks = tl.cdiv(k, BLOCK_SIZE)
     block_idx = tl.arange(0, BLOCK_SIZE)
+    block_idx_k = tl.arange(0, BLOCK_SIZE_K)
+    num_blocks = tl.cdiv(k, BLOCK_SIZE_K)
     # Compute the pointers to the starting blocks of A (along axis=0) and B (along axis=1)
     # Note that the offsets are taken modulus the number of rows (resp. columns) of A (resp. B)
     # as to avoid going out of bounds
-    a_offs0 = (pid_i * BLOCK_SIZE + block_idx) % m
-    b_offs1 = (pid_j * BLOCK_SIZE + block_idx) % n
+    a_offs0 = pid_i * BLOCK_SIZE + block_idx
+    b_offs1 = pid_j * BLOCK_SIZE + block_idx
+    a_offs0 = tl.max_contiguous(a_offs0, BLOCK_SIZE)
+    b_offs1 = tl.max_contiguous(b_offs1, BLOCK_SIZE)
+    block_mask0 = a_offs0 < m
+    block_mask1 = b_offs1 < n
     # Multiply by the strides for A and B along axes 0 and 1 as to retrieve the pointers
-    a_ptrs = a_ptr + a_offs0[:, None] * a_str0 + block_idx[None, :] * a_str1
-    b_ptrs = b_ptr + block_idx[:, None] * b_str0 + b_offs1[None, :] * b_str1
+    a_ptrs = a_ptr + a_offs0[:, None] * a_str0 + block_idx_k[None, :] * a_str1
+    b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs1[None, :] * b_str1
     # Load the maximum values
-    block_mask0 = (pid_i * BLOCK_SIZE + block_idx) < m
-    block_mask1 = (pid_j * BLOCK_SIZE + block_idx) < n
     m_ptrs = m_ptr + pid_j * BLOCK_SIZE + block_idx
     max_block = tl.load(m_ptrs, mask=block_mask1, other=float("-inf"))
     # Instantiate the accumulator
@@ -91,23 +102,26 @@ def _ker_logmm2exp(
     # Compute and accumulate the dot products of block matrices
     for h in range(num_blocks):
         # Handle out of bounds using masks
-        block_mask = block_idx < k - h * BLOCK_SIZE
+        mask = block_idx_k + h * BLOCK_SIZE_K < k
         # Since the accumulator has fixed size, we load 0.0 whenever we are out of bounds
-        a_block = tl.load(a_ptrs, mask=block_mask[None, :], other=0.0)
-        b_block = tl.load(b_ptrs, mask=block_mask[:, None], other=0.0)
+        a_block = tl.load(a_ptrs, mask=block_mask0[:, None] & mask[None, :], other=0.0)
+        b_block = tl.load(b_ptrs, mask=mask[:, None] & block_mask1[None, :], other=0.0)
         # Exponentiate the values in the B matrix
         # But first subtract the maximum values for numerical stability
         exp_b_block = tl.exp(b_block - max_block)
         # Compute the dot product of blocks
-        acc = tl.dot(a_block, exp_b_block, acc=acc, input_precision="tf32" if USE_TF32 else "ieee")
+        acc = tl.dot(
+            a_block,
+            exp_b_block,
+            acc=acc,
+            input_precision="tf32" if USE_TF32 else "ieee",
+        )
         # Move the pointers for A along axis=1 by the block size
         # Move the pointers for B along axis=0 by the block size
-        a_ptrs += BLOCK_SIZE * a_str1
-        b_ptrs += BLOCK_SIZE * b_str0
+        a_ptrs += BLOCK_SIZE_K * a_str1
+        b_ptrs += BLOCK_SIZE_K * b_str0
     # Compute the logarithm of the accumulator, and add the maximum values back
     log_acc = max_block + tl.log(acc)
-    # Cast to the dtype of the output tensor
-    log_acc = log_acc.to(c_ptr.dtype.element_ty)
     # Compute the pointers where to store the accumulator values
     c_ptrs = c_ptr + a_offs0[:, None] * c_str0 + b_offs1[None, :] * c_str1
     # Store the block accumulator, and use masks
@@ -125,12 +139,8 @@ def logmm2exp(
     # Allocate the maximum values and the result tensors, on the same device
     m = torch.empty((b.shape[1]), dtype=a.dtype, device=a.device)
     c = torch.empty((a.shape[0], b.shape[1]), dtype=a.dtype, device=a.device)
-    # Compute the block size used to compute the maximum values of B along axis=0
-    # We take it as the next power of 2 of the number of rows in B
-    max_block_size = triton.next_power_of_2(b.shape[0])
     # Launch the kernel to compute the maximum values of the columns of B first
-    block_size = 16
-    grid_colsmax = lambda meta: (triton.cdiv(b.shape[1], block_size),)
+    grid_colsmax = lambda meta: (triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),)
     _ker_colsmax[grid_colsmax](
         b,
         m,
@@ -138,8 +148,6 @@ def logmm2exp(
         b.stride(1),
         b.shape[0],
         b.shape[1],
-        MAX_BLOCK_SIZE=max_block_size,
-        BLOCK_SIZE=block_size
     )
     # Launch the kernel
     grid_logmm2exp = lambda meta: (
