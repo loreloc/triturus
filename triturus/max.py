@@ -50,7 +50,7 @@ def _ker_vamax_reduce(
     tl.store(m_ptr + store_offs, m)
 
 
-def vamax(x: torch.Tensor, *, block_size: int = 128) -> torch.Tensor:
+def vamax(x: torch.Tensor, *, block_size: int = 256) -> torch.Tensor:
     assert len(x.shape) == 1
     n = x.shape[0]
     assert n > 0
@@ -128,7 +128,7 @@ def _ker_vmax_reduce(
 
 
 def vmax(
-    x: torch.Tensor, *, block_size: int = 128
+    x: torch.Tensor, *, block_size: int = 256
 ) -> tuple[torch.Tensor, torch.Tensor]:
     assert len(x.shape) == 1
     n = x.shape[0]
