@@ -37,10 +37,25 @@ import triton.language as tl
 # before switching to a different thread. As the amount of cache is limited,
 # the number of warps need to be carefully tuned.
 #
+# We keep the group size for program id swizzling constant,
+# as to reduce the total number of configurations to try. The program id
+# swizzling reorders the program ids as to better leverage the cache.
+# That is, program ids that would use the same data should be executed
+# together. In this case, the same data would be the rows (columns) of
+# the matrix A (B), as the same rows and columns are used for filling
+# multiple entries of the output tensor.
+#
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_SIZE": bs, "BLOCK_SIZE_K": bsk}, num_warps=nw)
-        for bs, bsk, nw in itertools.product([64, 128, 256], [32, 64], [4, 8])
+        triton.Config({'BLOCK_SIZE':  16, 'BLOCK_SIZE_K':  16, 'GROUP_SIZE': 8}, num_stages=5, num_warps=1),
+        triton.Config({'BLOCK_SIZE':  32, 'BLOCK_SIZE_K':  32, 'GROUP_SIZE': 8}, num_stages=5, num_warps=2),
+        triton.Config({'BLOCK_SIZE':  32, 'BLOCK_SIZE_K':  64, 'GROUP_SIZE': 8}, num_stages=5, num_warps=2),
+        triton.Config({'BLOCK_SIZE':  64, 'BLOCK_SIZE_K':  32, 'GROUP_SIZE': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE':  64, 'BLOCK_SIZE_K':  64, 'GROUP_SIZE': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 128, 'BLOCK_SIZE_K':  32, 'GROUP_SIZE': 8}, num_stages=3, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 128, 'BLOCK_SIZE_K':  64, 'GROUP_SIZE': 8}, num_stages=2, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 128, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE': 8}, num_stages=2, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 256, 'BLOCK_SIZE_K':  64, 'GROUP_SIZE': 8}, num_stages=2, num_warps=8),
     ],
     key=["m", "k", "n"],
 )
@@ -58,13 +73,18 @@ def _ker_mm(
     m: int,
     k: int,
     n: int,
-    BLOCK_SIZE: tl.constexpr,  # The block size
+    BLOCK_SIZE: tl.constexpr,    # The block size
     BLOCK_SIZE_K: tl.constexpr,  # The block size along the dimension to contract
-    USE_TF32: tl.constexpr,  # Whether to use tf32 or ieee precision
+    GROUP_SIZE: tl.constexpr,    # The group size used for swizzling
+    USE_TF32: tl.constexpr,      # Whether to use tf32 or ieee precision
 ):
     # Retrieve the program ids on a 2D grid
-    pid_i = tl.program_id(axis=0)
-    pid_j = tl.program_id(axis=1)
+    pid = tl.program_id(axis=0)
+    num_programs0 = tl.cdiv(m, BLOCK_SIZE)
+    num_programs1 = tl.cdiv(n, BLOCK_SIZE)
+    pid_i = pid // num_programs1
+    pid_j = pid % num_programs1
+    pid_i, pid_j = tl.swizzle2d(pid_i, pid_j, num_programs0, num_programs1, GROUP_SIZE)
     # Compute the number of blocks to multiply and accumulate, and the block indices
     block_idx = tl.arange(0, BLOCK_SIZE)
     block_idx_k = tl.arange(0, BLOCK_SIZE_K)
@@ -110,6 +130,7 @@ def mm(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Ten
     assert a.shape[1] == b.shape[0]
     assert a.dtype == b.dtype
     assert a.device == b.device
+    assert a.is_contiguous() and b.is_contiguous()
 
     # Allocate the result tensor, on the same device
     c = torch.empty((a.shape[0], b.shape[1]), dtype=a.dtype, device=a.device)
@@ -118,7 +139,7 @@ def mm(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Ten
     #   the ceiling division of the number of rows in A and the block size;
     #   the ceiling division of the number of columns in B and the block size.
     grid = lambda meta: (
-        triton.cdiv(a.shape[0], meta["BLOCK_SIZE"]),
+        triton.cdiv(a.shape[0], meta["BLOCK_SIZE"]) * 
         triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),
     )
     # Launch the kernel and use the given grid settings
