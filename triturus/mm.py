@@ -47,15 +47,51 @@ import triton.language as tl
 #
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_SIZE':  16, 'BLOCK_SIZE_K':  16, 'GROUP_SIZE': 8}, num_stages=5, num_warps=1),
-        triton.Config({'BLOCK_SIZE':  32, 'BLOCK_SIZE_K':  32, 'GROUP_SIZE': 8}, num_stages=5, num_warps=2),
-        triton.Config({'BLOCK_SIZE':  32, 'BLOCK_SIZE_K':  64, 'GROUP_SIZE': 8}, num_stages=5, num_warps=2),
-        triton.Config({'BLOCK_SIZE':  64, 'BLOCK_SIZE_K':  32, 'GROUP_SIZE': 8}, num_stages=4, num_warps=4),
-        triton.Config({'BLOCK_SIZE':  64, 'BLOCK_SIZE_K':  64, 'GROUP_SIZE': 8}, num_stages=4, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 128, 'BLOCK_SIZE_K':  32, 'GROUP_SIZE': 8}, num_stages=3, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128, 'BLOCK_SIZE_K':  64, 'GROUP_SIZE': 8}, num_stages=2, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE': 8}, num_stages=2, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 256, 'BLOCK_SIZE_K':  64, 'GROUP_SIZE': 8}, num_stages=2, num_warps=8),
+        triton.Config(
+            {"BLOCK_SIZE": 16, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
+            num_stages=5,
+            num_warps=1,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+            num_stages=5,
+            num_warps=2,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+            num_stages=5,
+            num_warps=2,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+            num_stages=4,
+            num_warps=4,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+            num_stages=4,
+            num_warps=4,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+            num_stages=3,
+            num_warps=8,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+            num_stages=2,
+            num_warps=8,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 128, "GROUP_SIZE": 8},
+            num_stages=2,
+            num_warps=8,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 256, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+            num_stages=2,
+            num_warps=8,
+        ),
     ],
     key=["m", "k", "n"],
 )
@@ -73,10 +109,10 @@ def _ker_mm(
     m: int,
     k: int,
     n: int,
-    BLOCK_SIZE: tl.constexpr,    # The block size
+    BLOCK_SIZE: tl.constexpr,  # The block size
     BLOCK_SIZE_K: tl.constexpr,  # The block size along the dimension to contract
-    GROUP_SIZE: tl.constexpr,    # The group size used for swizzling
-    USE_TF32: tl.constexpr,      # Whether to use tf32 or ieee precision
+    GROUP_SIZE: tl.constexpr,  # The group size used for swizzling
+    PRECISION: tl.constexpr,  # It can be either 'tf32' or 'ieee'
 ):
     # Retrieve the program ids on a 2D grid
     pid = tl.program_id(axis=0)
@@ -93,42 +129,43 @@ def _ker_mm(
     # pid_i, pid_j = (0,0)    (0,1)     (1,0)     (1,1)    ...
     # a_offs0      = [0..32]  [ 0..32]  [32..64]  [32..64] ...
     # b_offs1      = [0..32]  [32..64]  [ 0..32]  [32..64] ...
-    a_offs0 = pid_i * BLOCK_SIZE + block_idx
-    b_offs1 = pid_j * BLOCK_SIZE + block_idx
-    a_offs0 = tl.max_contiguous(a_offs0, BLOCK_SIZE)
-    b_offs1 = tl.max_contiguous(b_offs1, BLOCK_SIZE)
-    block_mask0 = a_offs0 < m
-    block_mask1 = b_offs1 < n
+    a_offs0 = (pid_i * BLOCK_SIZE + block_idx) % m
+    b_offs1 = (pid_j * BLOCK_SIZE + block_idx) % n
     # Multiply by the strides for A and B along axes 0 and 1 as to retrieve the pointers
     a_ptrs = a_ptr + a_offs0[:, None] * a_str0 + block_idx_k[None, :] * a_str1
     b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs1[None, :] * b_str1
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
-    for h in range(num_blocks):
-        # Handle out of bounds using masks
-        mask = block_idx_k + h * BLOCK_SIZE_K < k
-        # Since the accumulator has fixed size, we load 0.0 whenever we are out of bounds
-        a_block = tl.load(a_ptrs, mask=block_mask0[:, None] & mask[None, :], other=0.0)
-        b_block = tl.load(b_ptrs, mask=mask[:, None] & block_mask1[None, :], other=0.0)
+    for _ in range(num_blocks - 1):
+        # Load the blocks
+        a_block = tl.load(a_ptrs)
+        b_block = tl.load(b_ptrs)
         # Compute the dot product of blocks
-        acc = tl.dot(
-            a_block, b_block, acc=acc, input_precision="tf32" if USE_TF32 else "ieee"
-        )
+        acc = tl.dot(a_block, b_block, acc=acc, input_precision=PRECISION)
         # Move the pointers for A along axis=1 by the block size
         # Move the pointers for B along axis=0 by the block size
         a_ptrs += BLOCK_SIZE_K * a_str1
         b_ptrs += BLOCK_SIZE_K * b_str0
+    # Handle out of bounds using masks
+    mask = block_idx_k + (num_blocks - 1) * BLOCK_SIZE_K < k
+    # Since the accumulator has fixed size, we load 0.0 whenever we are out of bounds
+    a_block = tl.load(a_ptrs, mask=mask[None, :], other=0.0)
+    b_block = tl.load(b_ptrs, mask=mask[:, None], other=0.0)
+    # Compute the dot product of blocks
+    acc = tl.dot(a_block, b_block, acc=acc, input_precision=PRECISION)
     # Compute the pointers where to store the accumulator values
     c_ptrs = c_ptr + a_offs0[:, None] * c_str0 + b_offs1[None, :] * c_str1
     # Store the block accumulator, and use masks
+    block_mask0 = a_offs0 < m
+    block_mask1 = b_offs1 < n
     tl.store(c_ptrs, acc, mask=block_mask0[:, None] & block_mask1[None, :])
 
 
 def mm(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Tensor:
     assert len(a.shape) == len(b.shape) == 2
     assert a.shape[1] == b.shape[0]
-    assert a.dtype == b.dtype
+    assert a.dtype == b.dtype == torch.float32
     assert a.device == b.device
     assert a.is_contiguous() and b.is_contiguous()
 
@@ -139,8 +176,8 @@ def mm(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Ten
     #   the ceiling division of the number of rows in A and the block size;
     #   the ceiling division of the number of columns in B and the block size.
     grid = lambda meta: (
-        triton.cdiv(a.shape[0], meta["BLOCK_SIZE"]) * 
-        triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),
+        triton.cdiv(a.shape[0], meta["BLOCK_SIZE"])
+        * triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),
     )
     # Launch the kernel and use the given grid settings
     _ker_mm[grid](
@@ -156,6 +193,6 @@ def mm(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Ten
         a.shape[0],
         a.shape[1],
         b.shape[1],
-        USE_TF32=use_tf32,
+        PRECISION="tf32" if use_tf32 else "ieee",
     )
     return c
