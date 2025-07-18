@@ -1,5 +1,3 @@
-import itertools
-
 import torch
 import triton
 import triton.language as tl
@@ -7,10 +5,32 @@ import triton.language as tl
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_SIZE": bs, "BLOCK_SIZE_K": bsk}, num_warps=nw)
-        for bs, bsk, nw in itertools.product([64, 128, 256], [64, 128], [4, 8])
+        # triton.Config(
+        #     {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 64}, num_stages=5, num_warps=2
+        # ),
+        # triton.Config(
+        #     {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 32}, num_stages=4, num_warps=4
+        # ),
+        # triton.Config(
+        #     {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 64}, num_stages=4, num_warps=4
+        # ),
+        # triton.Config(
+        #     {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 32}, num_stages=3, num_warps=8
+        # ),
+        # triton.Config(
+        #     {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 64}, num_stages=2, num_warps=8
+        # ),
+        # triton.Config(
+        #     {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 128}, num_stages=2, num_warps=8
+        # ),
+        # triton.Config(
+        #     {"BLOCK_SIZE": 256, "BLOCK_SIZE_K": 64}, num_stages=2, num_warps=8
+        # ),
+        triton.Config(
+            {"BLOCK_SIZE": 512, "BLOCK_SIZE_K": 128}, num_stages=2, num_warps=8
+        ),
     ],
-    key=["k", "n"],
+    key=["m", "k", "n"],
 )
 @triton.jit
 def _ker_colsmax(
@@ -28,31 +48,74 @@ def _ker_colsmax(
     # Compute the maximum values of B along axis=0
     block_idx = tl.arange(0, BLOCK_SIZE)
     block_idx_k = tl.arange(0, BLOCK_SIZE_K)
-    num_blocks = tl.cdiv(k, BLOCK_SIZE)
+    num_blocks = tl.cdiv(k, BLOCK_SIZE_K)
     # Compute the pointers to the starting blocks of B (along axis=1)
-    b_offs = pid_i * BLOCK_SIZE + block_idx
-    b_offs = tl.max_contiguous(b_offs, BLOCK_SIZE)
-    block_mask1 = b_offs < n
-    b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs[None, :] * b_str1
+    b_offs1 = (pid_i * BLOCK_SIZE + block_idx) % n
+    b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs1[None, :] * b_str1
     # Compute the number of blocks along axis=0 and reduce to the maximum values
     max_block = tl.full((BLOCK_SIZE,), value=float("-inf"), dtype=tl.float32)
-    for h in range(num_blocks):
+    for _ in range(num_blocks - 1):
         # Read the block columns and reduce to the maximum values
-        mask = block_idx_k + h * BLOCK_SIZE_K < k
-        block = tl.load(
-            b_ptrs, mask=mask[:, None] & block_mask1[None, :], other=float("-inf")
-        )
+        block = tl.load(b_ptrs)
         max_block = tl.maximum(max_block, tl.max(block, axis=0))
         b_ptrs += BLOCK_SIZE_K * b_str0
+    # Read the block columns and reduce to the maximum values
+    mask = block_idx_k + (num_blocks - 1) * BLOCK_SIZE_K < k
+    block = tl.load(b_ptrs, mask=mask[:, None], other=float("-inf"))
+    max_block = tl.maximum(max_block, tl.max(block, axis=0))
     # Store the maximum values
-    m_ptrs = m_ptr + b_offs
+    m_ptrs = m_ptr + b_offs1
+    block_mask1 = b_offs1 < n
     tl.store(m_ptrs, max_block, mask=block_mask1)
 
 
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_SIZE": bs, "BLOCK_SIZE_K": bsk}, num_warps=nw)
-        for bs, bsk, nw in itertools.product([64, 128, 256], [32, 64], [4, 8])
+        triton.Config(
+            {"BLOCK_SIZE": 16, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
+            num_stages=5,
+            num_warps=1,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+            num_stages=5,
+            num_warps=2,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+            num_stages=5,
+            num_warps=2,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+            num_stages=4,
+            num_warps=4,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+            num_stages=4,
+            num_warps=4,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+            num_stages=3,
+            num_warps=8,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+            num_stages=2,
+            num_warps=8,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 128, "GROUP_SIZE": 8},
+            num_stages=2,
+            num_warps=8,
+        ),
+        triton.Config(
+            {"BLOCK_SIZE": 256, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+            num_stages=2,
+            num_warps=8,
+        ),
     ],
     key=["m", "k", "n"],
 )
@@ -73,58 +136,70 @@ def _ker_logmm2exp(
     n: int,
     BLOCK_SIZE: tl.constexpr,  # The block size
     BLOCK_SIZE_K: tl.constexpr,  # The block size along the dimension to contract
-    USE_TF32: tl.constexpr,  # Whether to use tf32 or ieee precision
+    GROUP_SIZE: tl.constexpr,  # The group size used for swizzling
+    PRECISION: tl.constexpr,  # It can be either 'tf32' or 'ieee'
 ):
     # Retrieve the program ids on a 2D grid
-    pid_i = tl.program_id(axis=0)
-    pid_j = tl.program_id(axis=1)
+    pid = tl.program_id(axis=0)
+    num_programs0 = tl.cdiv(m, BLOCK_SIZE)
+    num_programs1 = tl.cdiv(n, BLOCK_SIZE)
+    pid_i = pid // num_programs1
+    pid_j = pid % num_programs1
+    pid_i, pid_j = tl.swizzle2d(pid_i, pid_j, num_programs0, num_programs1, GROUP_SIZE)
     # Compute the number of blocks to multiply and accumulate, and the block indices
     block_idx = tl.arange(0, BLOCK_SIZE)
     block_idx_k = tl.arange(0, BLOCK_SIZE_K)
     num_blocks = tl.cdiv(k, BLOCK_SIZE_K)
     # Compute the pointers to the starting blocks of A (along axis=0) and B (along axis=1)
-    # Note that the offsets are taken modulus the number of rows (resp. columns) of A (resp. B)
-    # as to avoid going out of bounds
-    a_offs0 = pid_i * BLOCK_SIZE + block_idx
-    b_offs1 = pid_j * BLOCK_SIZE + block_idx
-    a_offs0 = tl.max_contiguous(a_offs0, BLOCK_SIZE)
-    b_offs1 = tl.max_contiguous(b_offs1, BLOCK_SIZE)
-    block_mask0 = a_offs0 < m
-    block_mask1 = b_offs1 < n
+    a_offs0 = (pid_i * BLOCK_SIZE + block_idx) % m
+    b_offs1 = (pid_j * BLOCK_SIZE + block_idx) % n
     # Multiply by the strides for A and B along axes 0 and 1 as to retrieve the pointers
     a_ptrs = a_ptr + a_offs0[:, None] * a_str0 + block_idx_k[None, :] * a_str1
     b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs1[None, :] * b_str1
     # Load the maximum values
-    m_ptrs = m_ptr + pid_j * BLOCK_SIZE + block_idx
-    max_block = tl.load(m_ptrs, mask=block_mask1, other=float("-inf"))
+    max_block = tl.load(m_ptr + b_offs1)
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
-    for h in range(num_blocks):
-        # Handle out of bounds using masks
-        mask = block_idx_k + h * BLOCK_SIZE_K < k
-        # Since the accumulator has fixed size, we load 0.0 whenever we are out of bounds
-        a_block = tl.load(a_ptrs, mask=block_mask0[:, None] & mask[None, :], other=0.0)
-        b_block = tl.load(b_ptrs, mask=mask[:, None] & block_mask1[None, :], other=0.0)
-        # Exponentiate the values in the B matrix
-        # But first subtract the maximum values for numerical stability
+    for _ in range(num_blocks - 1):
+        # Load the blocks
+        a_block = tl.load(a_ptrs)
+        b_block = tl.load(b_ptrs)
+        # Exponentiate the values in the B matrix ...
+        # ... but first subtract the maximum values for numerical stability
         exp_b_block = tl.exp(b_block - max_block)
         # Compute the dot product of blocks
         acc = tl.dot(
             a_block,
             exp_b_block,
             acc=acc,
-            input_precision="tf32" if USE_TF32 else "ieee",
+            input_precision=PRECISION,
         )
         # Move the pointers for A along axis=1 by the block size
         # Move the pointers for B along axis=0 by the block size
         a_ptrs += BLOCK_SIZE_K * a_str1
         b_ptrs += BLOCK_SIZE_K * b_str0
+    # Handle out of bounds using masks
+    mask = block_idx_k + (num_blocks - 1) * BLOCK_SIZE_K < k
+    # Since the accumulator has fixed size, we load 0.0 whenever we are out of bounds
+    a_block = tl.load(a_ptrs, mask=mask[None, :], other=0.0)
+    b_block = tl.load(b_ptrs, mask=mask[:, None], other=0.0)
+    # Exponentiate the values in the B matrix
+    exp_b_block = tl.exp(b_block - max_block)
+    # Compute the dot product of blocks
+    acc = tl.dot(
+        a_block,
+        exp_b_block,
+        acc=acc,
+        input_precision=PRECISION,
+    )
     # Compute the logarithm of the accumulator, and add the maximum values back
     log_acc = max_block + tl.log(acc)
     # Compute the pointers where to store the accumulator values
     c_ptrs = c_ptr + a_offs0[:, None] * c_str0 + b_offs1[None, :] * c_str1
     # Store the block accumulator, and use masks
+    block_mask0 = a_offs0 < m
+    block_mask1 = b_offs1 < n
     tl.store(c_ptrs, log_acc, mask=block_mask0[:, None] & block_mask1[None, :])
 
 
@@ -133,8 +208,9 @@ def logmm2exp(
 ) -> torch.Tensor:
     assert len(a.shape) == len(b.shape) == 2
     assert a.shape[1] == b.shape[0]
-    assert a.dtype == b.dtype
+    assert a.dtype == b.dtype == torch.float32
     assert a.device == b.device
+    assert a.is_contiguous() and b.is_contiguous()
 
     # Allocate the maximum values and the result tensors, on the same device
     m = torch.empty((b.shape[1]), dtype=a.dtype, device=a.device)
@@ -151,8 +227,8 @@ def logmm2exp(
     )
     # Launch the kernel
     grid_logmm2exp = lambda meta: (
-        triton.cdiv(a.shape[0], meta["BLOCK_SIZE"]),
-        triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),
+        triton.cdiv(a.shape[0], meta["BLOCK_SIZE"])
+        * triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),
     )
     _ker_logmm2exp[grid_logmm2exp](
         a,
@@ -168,6 +244,6 @@ def logmm2exp(
         a.shape[0],
         a.shape[1],
         b.shape[1],
-        USE_TF32=use_tf32,
+        PRECISION="tf32" if use_tf32 else "ieee",
     )
     return c

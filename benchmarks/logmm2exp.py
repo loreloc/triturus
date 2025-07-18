@@ -1,7 +1,6 @@
 import torch
 import triton
 
-from baselines.logmm2exp import logmm2exp as torch_logmm2exp
 from baselines.logmm2exp import logmm2exp_jit as torch_logmm2exp_jit
 from benchmarks.utils import QUANTILES, Providers, eval_gbps
 from triturus.logmm2exp import logmm2exp
