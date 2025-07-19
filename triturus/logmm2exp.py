@@ -2,8 +2,6 @@ import torch
 import triton
 import triton.language as tl
 
-from triturus.max import matmax
-
 CONFIGS = [
     triton.Config(
         {"BLOCK_SIZE": 16, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
@@ -46,6 +44,11 @@ CONFIGS = [
         num_warps=8,
     ),
     triton.Config(
+        {"BLOCK_SIZE": 256, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+        num_stages=2,
+        num_warps=8,
+    ),
+    triton.Config(
         {"BLOCK_SIZE": 256, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
         num_stages=2,
         num_warps=8,
@@ -69,6 +72,7 @@ def _ker_logmm2exp(
     b_str1,  # The stride of B along axis=1
     c_str0,  # The stride of C along axis=0
     c_str1,  # The stride of C along axis=1
+    m_str,  # The stride of the maximums of the columns of B
     m: int,
     k: int,
     n: int,
@@ -95,7 +99,7 @@ def _ker_logmm2exp(
     a_ptrs = a_ptr + a_offs0[:, None] * a_str0 + block_idx_k[None, :] * a_str1
     b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs1[None, :] * b_str1
     # Load the maximum values
-    max_block = tl.load(m_ptr + b_offs1)
+    max_block = tl.load(m_ptr + b_offs1 * m_str)
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
@@ -151,8 +155,7 @@ def logmm2exp(
     assert a.is_contiguous() and b.is_contiguous()
 
     # Compute the maximums of each column of B
-    m = matmax(b, axis=0)
-    assert m.is_contiguous()
+    m = torch.amax(b, axis=0)
     # Allocate the result tensor, on the same device
     c = torch.empty((a.shape[0], b.shape[1]), dtype=a.dtype, device=a.device)
     # Launch the kernel
@@ -171,6 +174,7 @@ def logmm2exp(
         b.stride(1),
         c.stride(0),
         c.stride(1),
+        m.stride(0),
         a.shape[0],
         a.shape[1],
         b.shape[1],

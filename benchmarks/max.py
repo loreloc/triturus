@@ -72,7 +72,7 @@ def benchmark_matmax(m, n, provider, axis) -> tuple[float, float, float]:
     fn: Callable[[], torch.Tensor]
     match provider:
         case Providers.TORCH:
-            fn = lambda: torch.amax(x, dim=0)
+            fn = lambda: torch.amax(x, dim=axis)
         case Providers.TRITURUS:
             fn = lambda: matmax(x, axis=axis)
         case _:

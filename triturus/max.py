@@ -176,7 +176,7 @@ def matmax(
     x: torch.Tensor,
     axis: int = 0,
     *,
-    block_size: int = 128,
+    block_size: int = 32,
 ) -> torch.Tensor:
     assert len(x.shape) == 2
     assert x.is_floating_point()
@@ -227,4 +227,4 @@ def matmax(
         )
         n = num_programs_redux
         stride *= block_size
-    return stage_max[:, 0].contiguous()
+    return stage_max[:, 0]
