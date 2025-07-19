@@ -42,7 +42,7 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "n"],
-            x_vals=[32, 48, 128, 192, 512, 768, 2048, 3072, 8192],
+            x_vals=[32, 48, 128, 192, 512, 768, 2048, 3072, 8192, 16384],
             x_log=True,
             line_arg="provider",
             line_vals=[
@@ -61,7 +61,7 @@ CONFIGS = [
             plot_name=f"logmm2exp performance (rectangular matrices k={k})",
             args={"k": k},
         )
-        for k in [256, 512]
+        for k in [128, 256, 512]
     ),
 ]
 
