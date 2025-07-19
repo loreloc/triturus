@@ -36,9 +36,33 @@ CONFIGS = [
             Providers.TRITURUS_MAXFUSED,
         ],
         ylabel="GiB/s",
-        plot_name="logmm2exp performance",
+        plot_name="logmm2exp performance (squared matrices)",
         args={},
-    )
+    ),
+    *tuple(
+        triton.testing.Benchmark(
+            x_names=["m", "n"],
+            x_vals=[32, 48, 128, 192, 512, 768, 2048, 3072, 8192],
+            x_log=True,
+            line_arg="provider",
+            line_vals=[
+                Providers.TORCH,
+                Providers.TORCH_JIT,
+                Providers.TRITURUS,
+                Providers.TRITURUS_MAXFUSED,
+            ],
+            line_names=[
+                Providers.TORCH,
+                Providers.TORCH_JIT,
+                Providers.TRITURUS,
+                Providers.TRITURUS_MAXFUSED,
+            ],
+            ylabel="GiB/s",
+            plot_name=f"logmm2exp performance (rectangular matrices k={k})",
+            args={"k": k},
+        )
+        for k in [256, 512]
+    ),
 ]
 
 
