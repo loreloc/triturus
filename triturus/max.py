@@ -182,7 +182,8 @@ def matmax(
     assert x.is_floating_point()
     assert x.is_contiguous()
     assert axis in {0, 1}
-    x = x if axis == 1 else x.T
+    if axis == 0:
+        x = x.T
     m, n = x.shape
     # Compute the number of programs
     num_programs_batch = triton.cdiv(m, block_size)
@@ -226,4 +227,4 @@ def matmax(
         )
         n = num_programs_redux
         stride *= block_size
-    return stage_max[:, 0]
+    return stage_max[:, 0].contiguous()
