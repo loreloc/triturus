@@ -21,7 +21,7 @@ CONFIGS_VMAX = [
         line_vals=[Providers.TORCH, Providers.TRITURUS],
         line_names=[Providers.TORCH, Providers.TRITURUS],
         ylabel="TFLOPS",
-        plot_name="vmax performance",
+        plot_name=f"vmax performance (return_indices={return_indices})",
         args={"return_indices": return_indices},
     )
     for return_indices in [False, True]
