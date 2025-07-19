@@ -11,45 +11,25 @@ def _ker_vamax(
     m_ptr,  # A pointer to the maximums vector
     n: int,  # The size of the input vector
     BLOCK_SIZE: tl.constexpr,  # The block size
-):
-    # Retrieve the program id on a 1D grid
-    pid = tl.program_id(axis=0)
-    # Compute the offsets of each block. E.g., if BLOCK_SIZE = 32 then
-    # pid  =  0       1       2       3       ...
-    # offs = [0..32][32..64][64..96][96..128] ...
-    offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    offs = tl.max_contiguous(offs, BLOCK_SIZE)
-    # Compute the mask corresponding to valid data entries
-    mask = offs < n
-    # Load a block of the input vectors to the DRAM
-    x = tl.load(x_ptr + offs, mask=mask, other=-float("inf"))
-    # Compute the maximum in the block
-    m = tl.max(x, axis=0)
-    # Store the maximum in the maximums vector
-    tl.store(m_ptr + pid, m)
-
-
-@triton.jit
-def _ker_vamax_reduce(
-    m_ptr,  # A pointer to the maximums vector
-    n: int,  # The size of the maximums vector
-    BLOCK_SIZE: tl.constexpr,  # The block size
-    STRIDE: tl.constexpr,  # The stride, which increases after each reduction stage
+    STRIDE: tl.constexpr,  # The stride to be used, it is a power of BLOCK_SIZE
 ):
     # Retrieve the program id on a 1D grid
     pid = tl.program_id(axis=0)
     # Compute the offsets of each block
-    offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    offs = tl.max_contiguous(offs, BLOCK_SIZE)
-    # Compute the mask corresponding to valid data entries
-    mask = offs * STRIDE < n
-    # Load a block of the input vectors to the DRAM
-    x = tl.load(m_ptr + offs * STRIDE, mask=mask, other=-float("inf"))
+    BLOCK_STRIDE: tl.constexpr = STRIDE // BLOCK_SIZE
+    x_offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    if BLOCK_STRIDE > 0:
+        x_offs = x_offs * BLOCK_STRIDE
+        x_offs = tl.multiple_of(x_offs, BLOCK_STRIDE)
+    else:
+        x_offs = tl.max_contiguous(x_offs, BLOCK_SIZE)
+    # Load a block
+    mask = x_offs < n
+    x = tl.load(x_ptr + x_offs, mask=mask, other=-float("inf"))
     # Compute the maximum in the block
     m = tl.max(x, axis=0)
-    # Store the maximum in the maximums vector
-    store_offs = pid * STRIDE * BLOCK_SIZE
-    tl.store(m_ptr + store_offs, m)
+    # Store the maximum
+    tl.store(m_ptr + pid * STRIDE, m)
 
 
 def vamax(x: torch.Tensor, *, block_size: int = 256) -> torch.Tensor:
@@ -62,17 +42,17 @@ def vamax(x: torch.Tensor, *, block_size: int = 256) -> torch.Tensor:
     stage_max = torch.empty(num_programs, dtype=x.dtype, device=x.device)
     # Launch the first reduce kernel and use the given block size
     grid = (num_programs,)
-    _ker_vamax[grid](x, stage_max, n, BLOCK_SIZE=block_size)
+    _ker_vamax[grid](x, stage_max, n, BLOCK_SIZE=block_size, STRIDE=1)
     # Compute the number of reduction iterations
     num_iters = math.ceil(math.log(n, block_size)) - 1
     m, n = len(stage_max), num_programs
-    stride = 1
+    stride = block_size
     for _ in range(num_iters):
         # Compute the number of programs
         num_programs = triton.cdiv(n, block_size)
         # Launch the reduce kernel
         grid = (num_programs,)
-        _ker_vamax_reduce[grid](stage_max, m, BLOCK_SIZE=block_size, STRIDE=stride)
+        _ker_vamax[grid](stage_max, stage_max, m, BLOCK_SIZE=block_size, STRIDE=stride)
         n = num_programs
         stride *= block_size
     return stage_max[0]
@@ -83,52 +63,33 @@ def _ker_vmax(
     x_ptr,  # A pointer to a 1-dimensional vector
     m_ptr,  # A pointer to the maximums vector
     i_ptr,  # A pointer to the max indices vector
-    n: int,  # The size of the maximums vector
+    n: int,  # The size of the input vector
     BLOCK_SIZE: tl.constexpr,  # The block size
+    STRIDE: tl.constexpr,  # The stride to be used, it is a power of BLOCK_SIZE
 ):
     # Retrieve the program id on a 1D grid
     pid = tl.program_id(axis=0)
-    # Compute the offsets of each block. E.g., if BLOCK_SIZE = 32 then
-    # pid  =  0       1       2       3       ...
-    # offs = [0..32][32..64][64..96][96..128] ...
-    offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    offs = tl.max_contiguous(offs, BLOCK_SIZE)
-    # Compute the mask corresponding to valid data entries
-    mask = offs < n
-    # Load a block of the input vectors to the DRAM
-    x = tl.load(x_ptr + offs, mask=mask, other=-float("inf"))
-    # Compute the maximum and its index in the block
-    m, i = tl.max(x, axis=0, return_indices=True)
-    # Store the maximum and the index in the working arrays
-    tl.store(m_ptr + pid, m)
-    tl.store(i_ptr + pid, pid * BLOCK_SIZE + i)
-
-
-@triton.jit
-def _ker_vmax_reduce(
-    m_ptr,  # A pointer to the maximums vector
-    i_ptr,  # A pointer to the maximums indices vector
-    n: int,  # The size of the maximums vector
-    BLOCK_SIZE: tl.constexpr,  # The block size
-    STRIDE: tl.constexpr,  # The stride, which increases after each reduction stage
-):
-    # Retrieve the program id on a 1D grid
-    pid = tl.program_id(axis=0)
-    # Compute the offsets of each block. E.g., if BLOCK_SIZE = 32 then
-    # pid  =  0       1       2       3       ...
-    # offs = [0..32][32..64][64..96][96..128] ...
-    offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    offs = tl.max_contiguous(offs, BLOCK_SIZE)
-    # Compute the mask corresponding to valid data entries
-    mask = offs * STRIDE < n
-    # Load a block of the input vectors to the DRAM
-    x = tl.load(m_ptr + offs * STRIDE, mask=mask, other=-float("inf"))
-    # Compute the maximum and its index in the block
+    # Compute the offsets of each block
+    BLOCK_STRIDE: tl.constexpr = STRIDE // BLOCK_SIZE
+    x_offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    if BLOCK_STRIDE > 0:
+        x_offs = x_offs * BLOCK_STRIDE
+        x_offs = tl.multiple_of(x_offs, BLOCK_STRIDE)
+    else:
+        x_offs = tl.max_contiguous(x_offs, BLOCK_SIZE)
+    # Load a block
+    mask = x_offs < n
+    x = tl.load(x_ptr + x_offs, mask=mask, other=-float("inf"))
+    # Compute the maximum in the block
     m, j = tl.max(x, axis=0, return_indices=True)
-    store_offs = pid * STRIDE * BLOCK_SIZE
-    tl.store(m_ptr + store_offs, m)
-    i = tl.load(i_ptr + (pid * BLOCK_SIZE + j) * STRIDE)
-    tl.store(i_ptr + store_offs, i)
+    # Store the maximum
+    tl.store(m_ptr + pid * STRIDE, m)
+    # Store the index
+    if BLOCK_STRIDE > 0:
+        i = tl.load(i_ptr + (pid * BLOCK_SIZE + j) * BLOCK_STRIDE)
+        tl.store(i_ptr + pid * STRIDE, i)
+    else:
+        tl.store(i_ptr + pid * STRIDE, pid * BLOCK_SIZE + j)
 
 
 def vmax(
@@ -145,18 +106,18 @@ def vmax(
     stage_idx = torch.empty(num_programs, dtype=torch.int64, device=x.device)
     # Launch the first reduce kernel and use the given block size
     grid = (num_programs,)
-    _ker_vmax[grid](x, stage_max, stage_idx, n, BLOCK_SIZE=block_size)
+    _ker_vmax[grid](x, stage_max, stage_idx, n, BLOCK_SIZE=block_size, STRIDE=1)
     # Compute the number of reduction iterations
     num_iters = math.ceil(math.log(n, block_size)) - 1
     m, n = len(stage_max), num_programs
-    stride = 1
+    stride = block_size
     for _ in range(num_iters):
         # Compute the number of programs
         num_programs = triton.cdiv(n, block_size)
         # Launch the reduce kernel
         grid = (num_programs,)
-        _ker_vmax_reduce[grid](
-            stage_max, stage_idx, m, BLOCK_SIZE=block_size, STRIDE=stride
+        _ker_vmax[grid](
+            stage_max, stage_max, stage_idx, m, BLOCK_SIZE=block_size, STRIDE=stride
         )
         n = num_programs
         stride *= block_size
