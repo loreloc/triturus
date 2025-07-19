@@ -2,71 +2,7 @@ import torch
 import triton
 import triton.language as tl
 
-
-@triton.autotune(
-    configs=[
-        triton.Config(
-            {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 64}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 32}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 64}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 128}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 256, "BLOCK_SIZE_K": 64}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 512, "BLOCK_SIZE_K": 128}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 512, "BLOCK_SIZE_K": 256}, num_stages=2, num_warps=8
-        ),
-    ],
-    key=["m", "k", "n"],
-)
-@triton.jit
-def _ker_colsmax(
-    b_ptr,  # A pointer to a K x N matrix (B)
-    m_ptr,  # A pointer to a N-dimensional vector, storing the maximums of B along axis=0
-    b_str0,  # The stride of B along axis=0
-    b_str1,  # The stride of B along axis=1
-    k: int,
-    n: int,
-    BLOCK_SIZE: tl.constexpr,  # The block size
-    BLOCK_SIZE_K: tl.constexpr,  # The block size along the dimension to contract
-):
-    # Retrieve the program ids on a 1D grid
-    pid_i = tl.program_id(axis=0)
-    # Compute the maximum values of B along axis=0
-    block_idx = tl.arange(0, BLOCK_SIZE)
-    block_idx_k = tl.arange(0, BLOCK_SIZE_K)
-    num_blocks = tl.cdiv(k, BLOCK_SIZE_K)
-    # Compute the pointers to the starting blocks of B (along axis=1)
-    b_offs1 = (pid_i * BLOCK_SIZE + block_idx) % n
-    b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs1[None, :] * b_str1
-    # Compute the number of blocks along axis=0 and reduce to the maximum values
-    max_block = tl.full((BLOCK_SIZE,), value=float("-inf"), dtype=tl.float32)
-    for _ in range(num_blocks - 1):
-        # Read the block columns and reduce to the maximum values
-        block = tl.load(b_ptrs)
-        max_block = tl.maximum(max_block, tl.max(block, axis=0))
-        b_ptrs += BLOCK_SIZE_K * b_str0
-    # Read the block columns and reduce to the maximum values
-    mask = block_idx_k + (num_blocks - 1) * BLOCK_SIZE_K < k
-    block = tl.load(b_ptrs, mask=mask[:, None], other=float("-inf"))
-    max_block = tl.maximum(max_block, tl.max(block, axis=0))
-    # Store the maximum values
-    m_ptrs = m_ptr + b_offs1
-    block_mask1 = b_offs1 < n
-    tl.store(m_ptrs, max_block, mask=block_mask1)
+from triturus.max import matmax
 
 
 @triton.autotune(
@@ -158,6 +94,7 @@ def _ker_logmm2exp(
     b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs1[None, :] * b_str1
     # Load the maximum values
     max_block = tl.load(m_ptr + b_offs1)
+    max_block = tl.where(tl.abs(max_block) == float("inf"), 0.0, max_block)
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
@@ -212,19 +149,10 @@ def logmm2exp(
     assert a.device == b.device
     assert a.is_contiguous() and b.is_contiguous()
 
-    # Allocate the maximum values and the result tensors, on the same device
-    m = torch.empty((b.shape[1]), dtype=a.dtype, device=a.device)
+    # Allocate the result tensor, on the same device
     c = torch.empty((a.shape[0], b.shape[1]), dtype=a.dtype, device=a.device)
-    # Launch the kernel to compute the maximum values of the columns of B first
-    grid_colsmax = lambda meta: (triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),)
-    _ker_colsmax[grid_colsmax](
-        b,
-        m,
-        b.stride(0),
-        b.stride(1),
-        b.shape[0],
-        b.shape[1],
-    )
+    # Compute the maximums of each column of B
+    m = matmax(b, axis=0)
     # Launch the kernel
     grid_logmm2exp = lambda meta: (
         triton.cdiv(a.shape[0], meta["BLOCK_SIZE"])
