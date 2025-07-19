@@ -1,18 +1,26 @@
+from collections.abc import Callable
+
 import torch
 import triton
 
-from benchmarks.utils import QUANTILES, Providers, eval_tflops
+from benchmarks.utils import QUANTILES, eval_tflops
 from triturus.mm import mm
 from triturus.utils import ensure_reproducibility
+
+
+class Providers:
+    TORCH = "torch"
+    TRITURUS = "triturus"
+
 
 CONFIGS = [
     triton.testing.Benchmark(
         x_names=["m", "k", "n"],
-        x_vals=[48 + 2**i for i in list(range(4, 15))],
+        x_vals=[32, 48, 128, 192, 512, 768, 2048, 3072, 8192],
         x_log=True,
         line_arg="provider",
-        line_vals=[Providers.CUBLAS, Providers.TRITURUS],
-        line_names=[Providers.CUBLAS, Providers.TRITURUS],
+        line_vals=[Providers.TORCH, Providers.TRITURUS],
+        line_names=[Providers.TORCH, Providers.TRITURUS],
         ylabel="TFLOPS",
         plot_name="mm performance",
         args={},
@@ -25,18 +33,15 @@ def benchmark_mm(m, k, n, provider) -> tuple[float, float, float]:
     ensure_reproducibility()
     a = torch.rand(m, k)
     b = torch.rand(k, n)
+    fn: Callable[[], torch.Tensor]
     match provider:
-        case Providers.CUBLAS:
-            ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: torch.mm(a, b), quantiles=QUANTILES
-            )
+        case Providers.TORCH:
+            fn = lambda: torch.mm(a, b)
         case Providers.TRITURUS:
-            ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: mm(a, b), quantiles=QUANTILES
-            )
+            fn = lambda: mm(a, b)
         case _:
             assert False, provider
-
+    ms, min_ms, max_ms = triton.testing.do_bench(fn, quantiles=QUANTILES)
     nflops = m * n * (2 * k - 1)
     return (
         eval_tflops(nflops, ms),
@@ -45,4 +50,4 @@ def benchmark_mm(m, k, n, provider) -> tuple[float, float, float]:
     )
 
 
-benchmark_mm.run(show_plots=True, print_data=True)
+benchmark_mm.run(print_data=True)

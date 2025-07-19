@@ -1,8 +1,3 @@
-class Providers:
-    CUBLAS = "cuBLAS"
-    TRITURUS = "triturus"
-
-
 QUANTILES = [0.5, 0.1, 0.9]
 
 
