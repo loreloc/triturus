@@ -34,6 +34,7 @@ def vadd(x: torch.Tensor, y: torch.Tensor, *, block_size: int = 512) -> torch.Te
     assert x.shape == y.shape
     assert x.dtype == y.dtype
     assert x.device == y.device
+    assert x.is_contiguous()
     n = x.shape[0]
     # Allocate the result tensor, on the same device
     r = torch.empty_like(x)

@@ -6,7 +6,7 @@ import triton
 from baselines.logmm2exp import logmm2exp as torch_logmm2exp
 from baselines.logmm2exp import logmm2exp_jit as torch_logmm2exp_jit
 from benchmarks.utils import QUANTILES, eval_gbps
-from triturus.logmm2exp import logmm2exp, logmm2exp_fused
+from triturus.logmm2exp import logmm2exp
 from triturus.utils import ensure_reproducibility
 
 
@@ -14,7 +14,6 @@ class Providers:
     TORCH = "torch"
     TORCH_JIT = "torch (jit)"
     TRITURUS = "triturus"
-    TRITURUS_MAXFUSED = "triturus (max-fused)"
 
 
 CONFIGS = [
@@ -27,13 +26,11 @@ CONFIGS = [
             Providers.TORCH,
             Providers.TORCH_JIT,
             Providers.TRITURUS,
-            Providers.TRITURUS_MAXFUSED,
         ],
         line_names=[
             Providers.TORCH,
             Providers.TORCH_JIT,
             Providers.TRITURUS,
-            Providers.TRITURUS_MAXFUSED,
         ],
         ylabel="GiB/s",
         plot_name="logmm2exp performance (squared matrices)",
@@ -41,27 +38,26 @@ CONFIGS = [
     ),
     *tuple(
         triton.testing.Benchmark(
-            x_names=["m", "n"],
-            x_vals=[32, 48, 128, 192, 512, 768, 2048, 3072, 8192, 16384],
+            x_names=["m"],
+            x_vals=[128, 192, 512, 768, 2048, 3072, 8192, 16384, 32768, 98304],
             x_log=True,
             line_arg="provider",
             line_vals=[
                 Providers.TORCH,
                 Providers.TORCH_JIT,
                 Providers.TRITURUS,
-                Providers.TRITURUS_MAXFUSED,
             ],
             line_names=[
                 Providers.TORCH,
                 Providers.TORCH_JIT,
                 Providers.TRITURUS,
-                Providers.TRITURUS_MAXFUSED,
             ],
             ylabel="GiB/s",
-            plot_name=f"logmm2exp performance (rectangular matrices k={k})",
-            args={"k": k},
+            plot_name=f"logmm2exp performance (rectangular matrices k={k}, n={n})",
+            args={"k": k, "n": n},
         )
-        for k in [128, 256, 512]
+        for k in [64, 128, 256, 512]
+        for n in [256]
     ),
 ]
 
@@ -79,8 +75,6 @@ def benchmark_logmm2exp(m, k, n, provider) -> tuple[float, float, float]:
             fn = lambda: torch_logmm2exp_jit(a, b)
         case Providers.TRITURUS:
             fn = lambda: logmm2exp(a, b)
-        case Providers.TRITURUS_MAXFUSED:
-            fn = lambda: logmm2exp_fused(a, b)
         case _:
             assert False, provider
     ms, min_ms, max_ms = triton.testing.do_bench(fn, quantiles=QUANTILES)
