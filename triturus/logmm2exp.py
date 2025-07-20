@@ -100,6 +100,7 @@ def _ker_logmm2exp(
     b_ptrs = b_ptr + block_idx_k[:, None] * b_str0 + b_offs1[None, :] * b_str1
     # Load the maximum values
     max_block = tl.load(m_ptr + b_offs1 * m_str)
+    max_block = tl.clamp(max_block, -1e38, 1e38)
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
@@ -226,7 +227,7 @@ def _ker_logmm2exp_fused(
     # Initialize the previous block of maximum values
     max_prev_block = tl.full((BLOCK_SIZE,), value=float("-inf"), dtype=tl.float32)
     # Instantiate the accumulator
-    acc = tl.full((BLOCK_SIZE, BLOCK_SIZE), 1.0, dtype=tl.float32)
+    acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
     for _ in range(num_blocks - 1):
         # Load the blocks
@@ -235,6 +236,7 @@ def _ker_logmm2exp_fused(
         # Compute the maximum values of the block of B ...
         # ... and take the maximum w.r.t. the maximum values in the previous block of B
         max_block = tl.maximum(max_prev_block, tl.max(b_block, axis=0))
+        max_block = tl.clamp(max_block, -1e38, 1e38)
         # Exponentiate the values in the B matrix ...
         # ... but first subtract the maximum values for numerical stability
         exp_b_block = tl.exp(b_block - max_block)
@@ -246,7 +248,7 @@ def _ker_logmm2exp_fused(
         )
         # Accumulate the computed dot values by firstly rescaling
         # based on the maximum values in the current block
-        acc = acc * tl.exp(max_prev_block - max_block) + block_acc
+        acc = tl.fma(acc, tl.exp(max_prev_block - max_block), block_acc)
         # Move the pointers for A along axis=1 by the block size
         # Move the pointers for B along axis=0 by the block size
         a_ptrs += BLOCK_SIZE_K * a_str1
@@ -261,6 +263,7 @@ def _ker_logmm2exp_fused(
     b_block = tl.load(b_ptrs, mask=mask[:, None], other=float("-inf"))
     # Compute the maximum values of the block of B
     max_block = tl.maximum(max_prev_block, tl.max(b_block, axis=0))
+    max_block = tl.clamp(max_block, -1e38, 1e38)
     # Exponentiate the values in the B matrix
     exp_b_block = tl.exp(b_block - max_block)
     # Compute the dot product of blocks
@@ -270,7 +273,7 @@ def _ker_logmm2exp_fused(
         input_precision=PRECISION,
     )
     # Aggregate the accumulated dot values as above
-    acc = acc * tl.exp(max_prev_block - max_block) + block_acc
+    acc = tl.fma(acc, tl.exp(max_prev_block - max_block), block_acc)
     # Compute the logarithm of the accumulator, and add the maximum values back
     log_acc = max_block + tl.log(acc)
     # Compute the pointers where to store the accumulator values
