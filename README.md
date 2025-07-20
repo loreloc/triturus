@@ -1,4 +1,6 @@
-# Triturus
+# 🦎 Triturus 🦎
+
+The following table describes the implemented kernels.
 
 | Kernel ID    | Description                                        | Operation                          | Source module                   |
 | ------------ | -------------------------------------------------- | ---------------------------------- | ------------------------------- |
