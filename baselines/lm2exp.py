@@ -7,7 +7,6 @@ def lm2exp(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     assert a.shape[2] == b.shape[1]
     assert a.dtype == b.dtype == torch.float32
     assert a.device == b.device
-    assert a.is_contiguous() and b.is_contiguous()
     #
     m = torch.amax(b, dim=1, keepdim=True)
     m = torch.clamp(m, -1e38, 1e38)

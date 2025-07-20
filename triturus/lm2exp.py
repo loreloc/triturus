@@ -4,77 +4,64 @@ import triton.language as tl
 
 CONFIGS = [
     triton.Config(
-        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
-        num_stages=6,
-        num_warps=1,
-    ),
-    triton.Config(
         {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
         num_stages=6,
         num_warps=1,
     ),
     triton.Config(
         {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
-        num_stages=2,
-        num_warps=4,
-    ),
-    triton.Config(
-        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
-        num_stages=4,
-        num_warps=4,
-    ),
-    triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
-        num_stages=2,
-        num_warps=4,
-    ),
-    triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
-        num_stages=4,
-        num_warps=4,
-    ),
-    triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
-        num_stages=2,
-        num_warps=4,
-    ),
-    triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
-        num_stages=4,
-        num_warps=4,
-    ),
-    triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
-        num_stages=4,
-        num_warps=4,
-    ),
-    triton.Config(
-        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
-        num_stages=3,
+        num_stages=6,
         num_warps=2,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
-        num_stages=3,
+        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
+        num_stages=5,
+        num_warps=2,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+        num_stages=5,
+        num_warps=2,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+        num_stages=5,
         num_warps=4,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+        num_stages=5,
+        num_warps=4,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+        num_stages=4,
+        num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+        num_stages=4,
+        num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+        num_stages=3,
+        num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
         num_stages=3,
         num_warps=8,
     ),
 ]
 
 
-@triton.autotune(
-    configs=CONFIGS,
-    key=["m", "k", "n"],
-)
+@triton.autotune(configs=CONFIGS, key=["batch", "m", "k", "n"])
 @triton.jit
-def _ker_logmm2exp(
-    a_ptr,  # A pointer to a F x M x K matrix (A)
-    b_ptr,  # A pointer to a F x K x N matrix (B)
-    c_ptr,  # A pointer to a F x M x N matrix (C)
+def _ker_lm2exp(
+    a_ptr,  # A pointer to a batch x M x K matrix (A)
+    b_ptr,  # A pointer to a batch x K x N matrix (B)
+    c_ptr,  # A pointer to a batch x M x N matrix (C)
     a_str0,  # The stride of A along axis=0
     a_str1,  # The stride of A along axis=1
     a_str2,  # The stride of A along axis=2
@@ -84,6 +71,7 @@ def _ker_logmm2exp(
     c_str0,  # The stride of C along axis=0
     c_str1,  # The stride of C along axis=1
     c_str2,  # The stride of C along axis=2
+    batch: int,  # The batch dimension
     m: int,
     k: int,
     n: int,
@@ -96,21 +84,21 @@ def _ker_logmm2exp(
 ):
     # Retrieve the program ids on a 3D grid
     pid = tl.program_id(axis=0)
+    num_programs = tl.num_programs(axis=0)
+    num_programs12 = num_programs // batch
     num_programs1 = tl.cdiv(m, BLOCK_SIZE_M)
-    num_programs2 = tl.cdiv(n, BLOCK_SIZE_N)
-    num_programs12 = num_programs1 * num_programs2
+    num_programs2 = num_programs12 // num_programs1
     pid_batch = pid // num_programs12
-    pid_ij = pid % num_programs12
-    pid_i = pid_ij // num_programs2
-    pid_j = pid_ij % num_programs2
+    pid_i = (pid % num_programs12) // num_programs2
+    pid_j = (pid % num_programs12) % num_programs2
     pid_i, pid_j = tl.swizzle2d(pid_i, pid_j, num_programs1, num_programs2, GROUP_SIZE)
     # Hint some information to the compiler
     tl.assume(pid_batch >= 0)
     tl.assume(pid_i >= 0)
     tl.assume(pid_j >= 0)
     tl.assume(m > 0)
-    tl.assume(n > 0)
     tl.assume(k > 0)
+    tl.assume(n > 0)
     tl.assume(a_str0 > 0)
     tl.assume(a_str1 > 0)
     tl.assume(a_str2 > 0)
@@ -131,7 +119,7 @@ def _ker_logmm2exp(
     a_offs1 = (pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % m
     b_offs2 = (pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % n
     # Compute the maximum values
-    tile_idx = tl.arange(0, TILE_SIZE) % n
+    tile_idx = tl.arange(0, TILE_SIZE) % k
     b_tile_ptrs = b_ptr + tile_idx[:, None] * b_str1 + b_offs2[None, :] * b_str2
     b_tile = tl.load(b_tile_ptrs)
     max_block = tl.clamp(tl.max(b_tile, axis=0), -1e38, 1e38)
@@ -148,7 +136,7 @@ def _ker_logmm2exp(
             b_block = tl.load(b_ptrs)
         else:
             # Handle out of bounds using masks
-            mask = block_idx_k + (num_blocks - 1) * BLOCK_SIZE_K < k
+            mask = block_idx_k + h * BLOCK_SIZE_K < k
             # Since the accumulator has fixed size, we load 0.0 whenever we are out of bounds
             a_block = tl.load(a_ptrs, mask=mask[None, :], other=0.0)
             b_block = tl.load(b_ptrs, mask=mask[:, None], other=0.0)
@@ -166,7 +154,7 @@ def _ker_logmm2exp(
         a_ptrs += BLOCK_SIZE_K * a_str2
         b_ptrs += BLOCK_SIZE_K * b_str1
     # Compute the logarithm of the accumulator, and add the maximum values back
-    log_acc = tl.log(acc) + max_block
+    log_acc = max_block + tl.log(acc)
     # Compute the pointers where to store the accumulator values
     c_ptrs = c_ptr + a_offs1[:, None] * c_str1 + b_offs2[None, :] * c_str2
     # Store the block accumulator, and use masks
@@ -175,15 +163,12 @@ def _ker_logmm2exp(
     tl.store(c_ptrs, log_acc, mask=block_mask1[:, None] & block_mask2[None, :])
 
 
-def logmm2exp(
-    a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False
-) -> torch.Tensor:
+def lm2exp(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Tensor:
     assert len(a.shape) == len(b.shape) == 3
     assert a.shape[0] == b.shape[0]
     assert a.shape[2] == b.shape[1]
     assert a.dtype == b.dtype == torch.float32
     assert a.device == b.device
-    assert a.is_contiguous() and b.is_contiguous()
 
     # Allocate the result tensor, on the same device
     c = torch.empty(
@@ -197,7 +182,7 @@ def logmm2exp(
         * triton.cdiv(a.shape[1], meta["BLOCK_SIZE_M"])
         * triton.cdiv(b.shape[2], meta["BLOCK_SIZE_N"]),
     )
-    _ker_logmm2exp[grid](
+    _ker_lm2exp[grid](
         a,
         b,
         c,
@@ -210,6 +195,7 @@ def logmm2exp(
         c.stride(0),
         c.stride(1),
         c.stride(2),
+        a.shape[0],
         a.shape[1],
         a.shape[2],
         b.shape[2],
