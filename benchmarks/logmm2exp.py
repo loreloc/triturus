@@ -77,7 +77,9 @@ def benchmark_logmm2exp(m, k, n, provider) -> tuple[float, float, float]:
             fn = lambda: logmm2exp(a, b)
         case _:
             assert False, provider
-    ms, min_ms, max_ms = triton.testing.do_bench(fn, warmup=50, rep=300, quantiles=QUANTILES)
+    ms, min_ms, max_ms = triton.testing.do_bench(
+        fn, warmup=50, rep=300, quantiles=QUANTILES
+    )
     size = m * k + k * n
     return (
         eval_gbps(size, ms),
