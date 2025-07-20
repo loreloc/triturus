@@ -3,7 +3,7 @@
 export PYTHONPATH=.
 
 BENCHMARKS_PATH="benchmarks"
-BENCHMARK_SUITES="add max mm logmm2exp"
+BENCHMARK_SUITES="add max mm lm2exp"
 
 for suite in $BENCHMARK_SUITES
 do
