@@ -46,18 +46,13 @@ import triton.language as tl
 @triton.autotune(
     configs=[
         triton.Config(
-            {"BLOCK_SIZE": 16, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
-            num_stages=5,
+            {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
+            num_stages=6,
             num_warps=1,
         ),
         triton.Config(
             {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
-            num_stages=5,
-            num_warps=2,
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
-            num_stages=5,
+            num_stages=6,
             num_warps=2,
         ),
         triton.Config(
@@ -72,7 +67,7 @@ import triton.language as tl
         ),
         triton.Config(
             {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
-            num_stages=3,
+            num_stages=4,
             num_warps=8,
         ),
         triton.Config(
@@ -119,6 +114,18 @@ def _ker_mm(
     pid_i = pid // num_programs1
     pid_j = pid % num_programs1
     pid_i, pid_j = tl.swizzle2d(pid_i, pid_j, num_programs0, num_programs1, GROUP_SIZE)
+    # Hint some information to the compiler
+    tl.assume(pid_i >= 0)
+    tl.assume(pid_j >= 0)
+    tl.assume(m > 0)
+    tl.assume(k > 0)
+    tl.assume(n > 0)
+    tl.assume(a_str0 > 0)
+    tl.assume(a_str1 > 0)
+    tl.assume(b_str0 > 0)
+    tl.assume(b_str1 > 0)
+    tl.assume(c_str0 > 0)
+    tl.assume(c_str1 > 0)
     # Compute the number of blocks to multiply and accumulate, and the block indices
     block_idx = tl.arange(0, BLOCK_SIZE)
     block_idx_k = tl.arange(0, BLOCK_SIZE_K)
