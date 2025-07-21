@@ -16,7 +16,7 @@ class Providers:
 CONFIGS = [
     triton.testing.Benchmark(
         x_names=["m", "k", "n"],
-        x_vals=[48, 128, 192, 512, 768, 2048, 3072, 8192],
+        x_vals=[48, 128, 192, 512, 768, 2048, 3072, 8192, 12288, 16384],
         x_log=True,
         line_arg="provider",
         line_vals=[Providers.TORCH, Providers.TRITURUS],
@@ -42,7 +42,7 @@ def benchmark_mm(m, k, n, provider) -> tuple[float, float, float]:
         case _:
             assert False, provider
     ms, min_ms, max_ms = triton.testing.do_bench(
-        fn, warmup=50, rep=300, quantiles=QUANTILES
+        fn, warmup=100, rep=500, quantiles=QUANTILES
     )
     nflops = m * n * (2 * k - 1)
     return (
