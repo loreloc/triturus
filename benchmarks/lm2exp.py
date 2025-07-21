@@ -38,6 +38,29 @@ CONFIGS = [
     ),
     *tuple(
         triton.testing.Benchmark(
+            x_names=["n", "k"],
+            x_vals=[32, 64, 128, 256, 512, 1024],
+            x_log=True,
+            line_arg="provider",
+            line_vals=[
+                Providers.TORCH,
+                Providers.TORCH_JIT,
+                Providers.TRITURUS,
+            ],
+            line_names=[
+                Providers.TORCH,
+                Providers.TORCH_JIT,
+                Providers.TRITURUS,
+            ],
+            ylabel="GiB/s",
+            plot_name=f"logmm2exp performance (rectangular matrices m={m} batch={batch})",
+            args={"m": m, "batch": batch},
+        )
+        for batch in [6, 24, 96, 384]
+        for m in [256]
+    ),
+    *tuple(
+        triton.testing.Benchmark(
             x_names=["m", "k"],
             x_vals=[32, 64, 128, 256, 512, 1024],
             x_log=True,
@@ -78,9 +101,9 @@ def benchmark_lm2exp(batch, m, k, n, provider) -> tuple[float, float, float]:
         case _:
             assert False, provider
     ms, min_ms, max_ms = triton.testing.do_bench(
-        fn, warmup=100, rep=500, quantiles=QUANTILES
+        fn, warmup=150, rep=1000, quantiles=QUANTILES
     )
-    size = m * k + k * n
+    size = batch * (m * k + k * n)
     return (
         eval_gbps(size, ms),
         eval_gbps(size, min_ms),
