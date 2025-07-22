@@ -38,6 +38,22 @@ CONFIGS = [
         )
         for allow_tf32 in [False, True]
     ),
+    *tuple(
+        triton.testing.Benchmark(
+            x_names=["m", "k"],
+            x_vals=[32, 64, 128, 256, 512, 1024],
+            x_log=True,
+            line_arg="provider",
+            line_vals=PROVIDERS,
+            line_names=PROVIDERS,
+            ylabel="GiB/s",
+            plot_name=f"logmm2exp performance (rectangular matrices n={n} batch={batch}, allow_tf32={allow_tf32})",
+            args={"m": m, "batch": batch, "allow_tf32": allow_tf32},
+        )
+        for batch in [6, 24, 96, 384]
+        for n in [256]
+        for allow_tf32 in [False, True]
+    ),
     # *tuple(
     #     triton.testing.Benchmark(
     #         x_names=["n", "k"],
@@ -47,26 +63,12 @@ CONFIGS = [
     #         line_vals=PROVIDERS,
     #         line_names=PROVIDERS,
     #         ylabel="GiB/s",
-    #         plot_name=f"logmm2exp performance (rectangular matrices m={m} batch={batch})",
-    #         args={"m": m, "batch": batch},
+    #         plot_name=f"logmm2exp performance (rectangular matrices m={m} batch={batch}, allow_tf32={allow_tf32})",
+    #         args={"m": m, "batch": batch, "allow_tf32": allow_tf32},
     #     )
     #     for batch in [6, 24, 96, 384]
     #     for m in [256]
-    # ),
-    # *tuple(
-    #     triton.testing.Benchmark(
-    #         x_names=["m", "k"],
-    #         x_vals=[32, 64, 128, 256, 512, 1024],
-    #         x_log=True,
-    #         line_arg="provider",
-    #         line_vals=PROVIDERS,
-    #         line_names=PROVIDERS,
-    #         ylabel="GiB/s",
-    #         plot_name=f"logmm2exp performance (rectangular matrices n={n} batch={batch})",
-    #         args={"n": n, "batch": batch},
-    #     )
-    #     for batch in [6, 24, 96, 384]
-    #     for n in [256]
+    #     for allow_tf32 in [False, True]
     # ),
 ]
 
