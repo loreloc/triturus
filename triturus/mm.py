@@ -2,6 +2,7 @@ import torch
 import triton
 import triton.language as tl
 
+from triturus.utils import cast_fp32_to_tf32, is_triturus_tf32_enabled
 
 # Automatically tune the block size and the number of warps,
 # for different combinations of the matrix dimensions m, k, n.
@@ -43,51 +44,51 @@ import triton.language as tl
 # the matrix A (B), as the same rows and columns are used for filling
 # multiple entries of the output tensor.
 #
-@triton.autotune(
-    configs=[
-        triton.Config(
-            {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
-            num_stages=6,
-            num_warps=1,
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
-            num_stages=6,
-            num_warps=2,
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
-            num_stages=4,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
-            num_stages=2,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 128, "GROUP_SIZE": 8},
-            num_stages=2,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_SIZE": 256, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
-            num_stages=2,
-            num_warps=8,
-        ),
-    ],
-    key=["m", "k", "n"],
-)
+CONFIGS = [
+    triton.Config(
+        {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
+        num_stages=6,
+        num_warps=1,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE": 32, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+        num_stages=6,
+        num_warps=2,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+        num_stages=4,
+        num_warps=4,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE": 64, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+        num_stages=4,
+        num_warps=4,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 32, "GROUP_SIZE": 8},
+        num_stages=4,
+        num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+        num_stages=2,
+        num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE": 128, "BLOCK_SIZE_K": 128, "GROUP_SIZE": 8},
+        num_stages=2,
+        num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE": 256, "BLOCK_SIZE_K": 64, "GROUP_SIZE": 8},
+        num_stages=2,
+        num_warps=8,
+    ),
+]
+
+
+@triton.autotune(configs=CONFIGS, key=["m", "k", "n"])
 @triton.jit
 def _ker_mm(
     a_ptr,  # A pointer to a M x K matrix (A)
@@ -105,8 +106,9 @@ def _ker_mm(
     BLOCK_SIZE: tl.constexpr,  # The block size
     BLOCK_SIZE_K: tl.constexpr,  # The block size along the dimension to contract
     GROUP_SIZE: tl.constexpr,  # The group size used for swizzling
-    PRECISION: tl.constexpr,  # It can be either 'tf32' or 'ieee'
+    ALLOW_TF32: tl.constexpr,  # Whether to allow tf32
 ):
+    PRECISION: tl.constexpr = "tf32" if ALLOW_TF32 else "ieee"
     # Retrieve the program ids on a 2D grid
     pid = tl.program_id(axis=0)
     num_programs0 = tl.cdiv(m, BLOCK_SIZE)
@@ -142,22 +144,29 @@ def _ker_mm(
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
-    for _ in range(num_blocks - 1):
+    for h in range(num_blocks - 1):
         # Load the blocks
         a_block = tl.load(a_ptrs)
         b_block = tl.load(b_ptrs)
         # Compute the dot product of blocks
+        if ALLOW_TF32:
+            a_block = cast_fp32_to_tf32(a_block)
+            b_block = cast_fp32_to_tf32(b_block)
         acc = tl.dot(a_block, b_block, acc=acc, input_precision=PRECISION)
         # Move the pointers for A along axis=1 by the block size
         # Move the pointers for B along axis=0 by the block size
         a_ptrs += BLOCK_SIZE_K * a_str1
         b_ptrs += BLOCK_SIZE_K * b_str0
+    # Perform the last dot product operation
     # Handle out of bounds using masks
     mask = block_idx_k + (num_blocks - 1) * BLOCK_SIZE_K < k
     # Since the accumulator has fixed size, we load 0.0 whenever we are out of bounds
     a_block = tl.load(a_ptrs, mask=mask[None, :], other=0.0)
     b_block = tl.load(b_ptrs, mask=mask[:, None], other=0.0)
     # Compute the dot product of blocks
+    if ALLOW_TF32:
+        a_block = cast_fp32_to_tf32(a_block)
+        b_block = cast_fp32_to_tf32(b_block)
     acc = tl.dot(a_block, b_block, acc=acc, input_precision=PRECISION)
     # Compute the pointers where to store the accumulator values
     c_ptrs = c_ptr + a_offs0[:, None] * c_str0 + b_offs1[None, :] * c_str1
@@ -167,7 +176,7 @@ def _ker_mm(
     tl.store(c_ptrs, acc, mask=block_mask0[:, None] & block_mask1[None, :])
 
 
-def mm(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Tensor:
+def mm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     assert len(a.shape) == len(b.shape) == 2
     assert a.shape[1] == b.shape[0]
     assert a.dtype == b.dtype == torch.float32
@@ -185,6 +194,7 @@ def mm(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Ten
         * triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),
     )
     # Launch the kernel and use the given grid settings
+    allow_tf32 = is_triturus_tf32_enabled()
     _ker_mm[grid](
         a,
         b,
@@ -198,6 +208,6 @@ def mm(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Ten
         a.shape[0],
         a.shape[1],
         b.shape[1],
-        PRECISION="tf32" if use_tf32 else "ieee",
+        ALLOW_TF32=allow_tf32,
     )
     return c

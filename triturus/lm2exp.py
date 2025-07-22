@@ -2,6 +2,8 @@ import torch
 import triton
 import triton.language as tl
 
+from triturus.utils import cast_fp32_to_tf32, is_triturus_tf32_enabled
+
 CONFIGS = [
     triton.Config(
         {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 16, "GROUP_SIZE": 8},
@@ -80,8 +82,9 @@ def _ker_lm2exp(
     BLOCK_SIZE_K: tl.constexpr,  # The block size along the dimension to contract
     GROUP_SIZE: tl.constexpr,  # The group size used for swizzling
     TILE_SIZE: tl.constexpr,  # The size of a tile column of B, i.e., next_power_of_2(k)
-    PRECISION: tl.constexpr,  # It can be either 'tf32' or 'ieee'
+    ALLOW_TF32: tl.constexpr,  # Whether to allow tf32
 ):
+    PRECISION: tl.constexpr = "tf32" if ALLOW_TF32 else "ieee"
     # Retrieve the program ids on a 3D grid
     pid = tl.program_id(axis=0)
     num_programs = tl.num_programs(axis=0)
@@ -142,10 +145,14 @@ def _ker_lm2exp(
             b_block = tl.load(b_ptrs, mask=mask[:, None], other=0.0)
         # Exponentiate the values in the B matrix ...
         # ... but first subtract the maximum values for numerical stability
+        b_block_exp = tl.exp(b_block - max_block)
         # Compute the dot product of blocks
+        if ALLOW_TF32:
+            a_block = cast_fp32_to_tf32(a_block)
+            b_block_exp = cast_fp32_to_tf32(b_block_exp)
         acc = tl.dot(
             a_block,
-            tl.exp(b_block - max_block),
+            b_block_exp,
             acc=acc,
             input_precision=PRECISION,
         )
@@ -163,7 +170,9 @@ def _ker_lm2exp(
     tl.store(c_ptrs, log_acc, mask=block_mask1[:, None] & block_mask2[None, :])
 
 
-def lm2exp(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch.Tensor:
+def lm2exp(
+    a: torch.Tensor, b: torch.Tensor, *, allow_tf32: bool = False
+) -> torch.Tensor:
     assert len(a.shape) == len(b.shape) == 3
     assert a.shape[0] == b.shape[0]
     assert a.shape[2] == b.shape[1]
@@ -174,14 +183,16 @@ def lm2exp(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch
     c = torch.empty(
         (a.shape[0], a.shape[1], b.shape[2]), dtype=a.dtype, device=a.device
     )
-    # Compute the tile size, which will be used to compute the maximum along multiple block columns in B
-    tile_size = triton.next_power_of_2(b.shape[0])
-    # Launch the kernel
+    # Specify how to compute the number of programs required in the grid
     grid = lambda meta: (
         a.shape[0]
         * triton.cdiv(a.shape[1], meta["BLOCK_SIZE_M"])
         * triton.cdiv(b.shape[2], meta["BLOCK_SIZE_N"]),
     )
+    # Compute the tile size, which will be used to compute the maximum along multiple block columns in B
+    tile_size = triton.next_power_of_2(b.shape[0])
+    # Launch the kernel
+    allow_tf32 = is_triturus_tf32_enabled()
     _ker_lm2exp[grid](
         a,
         b,
@@ -200,6 +211,6 @@ def lm2exp(a: torch.Tensor, b: torch.Tensor, *, use_tf32: bool = False) -> torch
         a.shape[2],
         b.shape[2],
         TILE_SIZE=tile_size,
-        PRECISION="tf32" if use_tf32 else "ieee",
+        ALLOW_TF32=allow_tf32,
     )
     return c
