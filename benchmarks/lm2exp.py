@@ -48,7 +48,7 @@ CONFIGS = [
             line_names=PROVIDERS,
             ylabel="GiB/s",
             plot_name=f"logmm2exp performance (rectangular matrices n={n} batch={batch}, allow_tf32={allow_tf32})",
-            args={"m": m, "batch": batch, "allow_tf32": allow_tf32},
+            args={"n": n, "batch": batch, "allow_tf32": allow_tf32},
         )
         for batch in [6, 24, 96, 384]
         for n in [256]
