@@ -50,7 +50,7 @@ CONFIGS = [
             plot_name=f"logmm2exp (rectangular matrices, n={n} batch={batch} allow_tf32={allow_tf32})",
             args={"n": n, "batch": batch, "allow_tf32": allow_tf32},
         )
-        for batch in [24, 96, 384]
+        for batch in [64, 384]
         for n in [256]
         for allow_tf32 in [False, True]
     ),

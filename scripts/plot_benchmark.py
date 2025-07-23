@@ -1,6 +1,7 @@
 import argparse
 import os
 import subprocess
+import textwrap
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -164,6 +165,7 @@ def plot_benchmark_result(
     title: str,
     *,
     show_y_label: bool = True,
+    show_legend: bool = True,
     ax: plt.Axes,
 ) -> None:
     df = df.copy()
@@ -176,8 +178,10 @@ def plot_benchmark_result(
         y_min, y_max = df[provider + "-min"], df[provider + "-max"]
         ax.fill_between(df[x_col], y_min, y_max, alpha=0.2)
         ax.plot(df[x_col], df[provider], label=provider)
-    ax.legend()
-    ax.set_title(title)
+    if show_legend:
+        ax.legend()
+    title_wrapped = "\n".join(textwrap.wrap(title, width=42))
+    ax.set_title(title_wrapped)
     ax.set_xscale("log")
     ax.set_xlabel(", ".join(x_names))
     if show_y_label:
@@ -216,12 +220,19 @@ if __name__ == "__main__":
             squeeze=False,
         )
         y_labels = set(b.ylabel for b in benchmarks)
+        providers = set(tuple(b.line_names) for b in benchmarks)
         if len(y_labels) != 1:
             raise ValueError(
                 f"Benchmark '{name}' runs should have the same metric"
                 f" (i.e., the ylabel), but found {y_labels}"
             )
+        if len(providers) != 1:
+            raise ValueError(
+                f"Benchmark '{name}' runs should have the same providers"
+                f" (i.e., the line names), but found {providers}"
+            )
         (y_label,) = tuple(y_labels)
+        (providers,) = tuple(providers)
         for i, df in enumerate(dfs):
             if print_results:
                 print(df)
@@ -229,11 +240,12 @@ if __name__ == "__main__":
             plot_benchmark_result(
                 df,
                 benchmark.args,
-                benchmark.line_names,
+                providers,
                 benchmark.x_names,
                 y_label,
                 benchmark.plot_name,
                 show_y_label=i == 0,
+                show_legend=i == 0,
                 ax=axs[0, i],
             )
         fig.savefig(filepath, bbox_inches="tight")
