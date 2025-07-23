@@ -21,32 +21,33 @@ CONFIGS_VMAX = [
         line_vals=[Providers.TORCH, Providers.TRITURUS],
         line_names=[Providers.TORCH, Providers.TRITURUS],
         ylabel="TFLOPS",
-        plot_name=f"vmax performance (return_indices={return_indices})",
-        args={"return_indices": return_indices},
+        plot_name=f"vmax (return_idx={return_idx})",
+        args={"return_idx": return_idx},
     )
-    for return_indices in [False, True]
+    for return_idx in [False, True]
 ]
 
 
 @triton.testing.perf_report(CONFIGS_VMAX)
-def benchmark_vmax(n, provider, return_indices) -> tuple[float, float, float]:
+def benchmark_vmax(n, provider, return_idx) -> tuple[float, float, float]:
     ensure_reproducibility()
     fn: Callable[[], torch.Tensor]
     x = torch.rand(n)
     match provider:
         case Providers.TORCH:
-            if return_indices:
+            if return_idx:
                 fn = lambda: torch.max(x, dim=0)
             else:
                 fn = lambda: torch.amax(x, dim=0)
         case Providers.TRITURUS:
-            if return_indices:
+            if return_idx:
                 fn = lambda: vmax(x)
             else:
                 fn = lambda: vamax(x)
         case _:
             assert False, provider
     ms, min_ms, max_ms = triton.testing.do_bench(fn, quantiles=QUANTILES)
+    nflops = n - 1
     return eval_tflops(n, ms), eval_tflops(n, min_ms), eval_tflops(n, max_ms)
 
 
@@ -58,7 +59,7 @@ CONFIGS_MATMAX = [
         line_vals=[Providers.TORCH, Providers.TRITURUS],
         line_names=[Providers.TORCH, Providers.TRITURUS],
         ylabel="TFLOPS",
-        plot_name=f"matmax performance (axis={axis})",
+        plot_name=f"matmax (axis={axis})",
         args={"axis": axis},
     )
     for axis in [0, 1]
@@ -78,7 +79,7 @@ def benchmark_matmax(m, n, provider, axis) -> tuple[float, float, float]:
         case _:
             assert False, provider
     ms, min_ms, max_ms = triton.testing.do_bench(fn, quantiles=QUANTILES)
-    nflops = m * n
+    nflops = n * (m - 1) if axis == 0 else m * (n - 1)
     return (
         eval_tflops(nflops, ms),
         eval_tflops(nflops, min_ms),
@@ -86,5 +87,6 @@ def benchmark_matmax(m, n, provider, axis) -> tuple[float, float, float]:
     )
 
 
-benchmark_vmax.run(print_data=True)
-benchmark_matmax.run(print_data=True)
+if __name__ == "__main__":
+    benchmark_vmax.run(print_data=True)
+    benchmark_matmax.run(print_data=True)

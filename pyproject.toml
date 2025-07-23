@@ -34,7 +34,7 @@ dev = [
   "pytest",
   "coverage",
   "pandas",
-  "matplotlib"
+  "matplotlib",
 ]
 
 [tool.pytest.ini_options]

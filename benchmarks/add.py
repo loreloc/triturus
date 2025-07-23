@@ -21,7 +21,7 @@ CONFIGS = [
         line_vals=[Providers.TORCH, Providers.TRITURUS],
         line_names=[Providers.TORCH, Providers.TRITURUS],
         ylabel="TFLOPS",
-        plot_name="vadd performance",
+        plot_name="vadd",
         args={},
     )
 ]
@@ -44,4 +44,5 @@ def benchmark_vadd(n, provider) -> tuple[float, float, float]:
     return eval_tflops(n, ms), eval_tflops(n, min_ms), eval_tflops(n, max_ms)
 
 
-benchmark_vadd.run(print_data=True)
+if __name__ == "__main__":
+    benchmark_vadd.run(print_data=True)

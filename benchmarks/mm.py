@@ -22,7 +22,7 @@ CONFIGS = [
         line_vals=[Providers.TORCH, Providers.TRITURUS],
         line_names=[Providers.TORCH, Providers.TRITURUS],
         ylabel="TFLOPS",
-        plot_name=f"mm performance (allow_tf32={allow_tf32})",
+        plot_name=f"mm (allow_tf32={allow_tf32})",
         args={"allow_tf32": allow_tf32},
     )
     for allow_tf32 in [False, True]
@@ -56,4 +56,5 @@ def benchmark_mm(
     )
 
 
-benchmark_mm.run(print_data=True)
+if __name__ == "__main__":
+    benchmark_mm.run(print_data=True)
