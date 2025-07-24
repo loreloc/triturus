@@ -20,6 +20,8 @@ The following table describes the implemented kernels.
 | mm           | Matrix multiplication with square matrices              | torch       | [here](#benchmark-of-mm)     |
 | lm2exp       | Batch log-matmul, square and rectangular batch matrices | torch + jit | [here](#benchmark-of-lm2exp) |
 
+---
+
 ### Benchmark of vmax
 
 <img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-vmax.png" alt="vmax" height=320px>
