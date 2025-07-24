@@ -27,7 +27,7 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "k", "n"],
-            x_vals=[128, 192, 256, 512, 768, 1536, 2048],
+            x_vals=[128, 192, 256, 384, 512, 768, 1024, 1536, 2048],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
@@ -41,7 +41,7 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "k"],
-            x_vals=[64, 96, 128, 192, 256, 512, 768, 1024],
+            x_vals=[64, 96, 128, 192, 256, 384, 512, 768, 1024],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
