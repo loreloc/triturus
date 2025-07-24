@@ -170,7 +170,7 @@ def _ker_lm2exp(
     tl.store(c_ptrs, log_acc, mask=block_mask1[:, None] & block_mask2[None, :])
 
 
-def lm2exp(a: torch.Tensor, b: torch.Tensor, *, allow_tf32: bool = False) -> torch.Tensor:
+def lm2exp(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     assert len(a.shape) == len(b.shape) == 3
     assert a.shape[0] == b.shape[0]
     assert a.shape[2] == b.shape[1]
