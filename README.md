@@ -24,16 +24,16 @@ The following table describes the implemented kernels.
 
 ### Benchmark of vmax
 
-<img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-vmax.png" alt="vmax" height=320px>
+<img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-vmax.png" alt="vmax" height=256px>
 
 ### Benchmark of matmax
 
-<img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-matmax.png" alt="matmax" height=320px>
+<img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-matmax.png" alt="matmax" height=256px>
 
 ### Benchmark of mm
 
-<img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-mm.png" alt="mm" height=320px>
+<img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-mm.png" alt="mm" height=256px>
 
 ### Benchmark of lm2exp
 
-<img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-lm2exp.png" alt="lm2exp" height=320px>
+<img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-lm2exp.png" alt="lm2exp" height=256px>
