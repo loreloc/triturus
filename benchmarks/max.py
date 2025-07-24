@@ -48,7 +48,7 @@ def benchmark_vmax(n, provider, return_idx) -> tuple[float, float, float]:
             assert False, provider
     ms, min_ms, max_ms = triton.testing.do_bench(fn, quantiles=QUANTILES)
     nflops = n - 1
-    return eval_tflops(n, ms), eval_tflops(n, min_ms), eval_tflops(n, max_ms)
+    return eval_tflops(nflops, ms), eval_tflops(nflops, min_ms), eval_tflops(nflops, max_ms)
 
 
 CONFIGS_MATMAX = [

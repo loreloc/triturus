@@ -30,9 +30,7 @@ CONFIGS = [
 
 
 @triton.testing.perf_report(CONFIGS)
-def benchmark_mm(
-    m, k, n, provider, *, allow_tf32: bool = False
-) -> tuple[float, float, float]:
+def benchmark_mm(m, k, n, provider, *, allow_tf32: bool = False) -> tuple[float, float, float]:
     ensure_reproducibility()
     set_tf32_enabled(allow_tf32)
     a = torch.rand(m, k)
@@ -45,9 +43,7 @@ def benchmark_mm(
             fn = lambda: mm(a, b)
         case _:
             assert False, provider
-    ms, min_ms, max_ms = triton.testing.do_bench(
-        fn, warmup=125, rep=750, quantiles=QUANTILES
-    )
+    ms, min_ms, max_ms = triton.testing.do_bench(fn, warmup=125, rep=750, quantiles=QUANTILES)
     nflops = m * n * (2 * k - 1)
     return (
         eval_tflops(nflops, ms),

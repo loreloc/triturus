@@ -91,9 +91,7 @@ def benchmark_lm2exp(
             fn = lambda: lm2exp(a, b)
         case _:
             assert False, provider
-    ms, min_ms, max_ms = triton.testing.do_bench(
-        fn, warmup=150, rep=1000, quantiles=QUANTILES
-    )
+    ms, min_ms, max_ms = triton.testing.do_bench(fn, warmup=150, rep=1000, quantiles=QUANTILES)
     size = batch * (m * k + k * n)
     return (
         eval_gbps(size, ms),

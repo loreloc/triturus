@@ -170,9 +170,7 @@ def _ker_lm2exp(
     tl.store(c_ptrs, log_acc, mask=block_mask1[:, None] & block_mask2[None, :])
 
 
-def lm2exp(
-    a: torch.Tensor, b: torch.Tensor, *, allow_tf32: bool = False
-) -> torch.Tensor:
+def lm2exp(a: torch.Tensor, b: torch.Tensor, *, allow_tf32: bool = False) -> torch.Tensor:
     assert len(a.shape) == len(b.shape) == 3
     assert a.shape[0] == b.shape[0]
     assert a.shape[2] == b.shape[1]
@@ -180,9 +178,7 @@ def lm2exp(
     assert a.device == b.device
 
     # Allocate the result tensor, on the same device
-    c = torch.empty(
-        (a.shape[0], a.shape[1], b.shape[2]), dtype=a.dtype, device=a.device
-    )
+    c = torch.empty((a.shape[0], a.shape[1], b.shape[2]), dtype=a.dtype, device=a.device)
     # Specify how to compute the number of programs required in the grid
     grid = lambda meta: (
         a.shape[0]

@@ -190,8 +190,7 @@ def mm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     #   the ceiling division of the number of rows in A and the block size;
     #   the ceiling division of the number of columns in B and the block size.
     grid = lambda meta: (
-        triton.cdiv(a.shape[0], meta["BLOCK_SIZE"])
-        * triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),
+        triton.cdiv(a.shape[0], meta["BLOCK_SIZE"]) * triton.cdiv(b.shape[1], meta["BLOCK_SIZE"]),
     )
     # Launch the kernel and use the given grid settings
     allow_tf32 = is_triturus_tf32_enabled()

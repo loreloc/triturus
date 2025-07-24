@@ -81,9 +81,7 @@ class MarkRunner:
                 rows[x_name].append(x_val)
             x_args = dict(zip(x_names, x))
             for y in bench.line_vals:
-                results = self._mark.fn(
-                    **x_args, **{bench.line_arg: y}, **bench.args, **kwargs
-                )
+                results = self._mark.fn(**x_args, **{bench.line_arg: y}, **bench.args, **kwargs)
                 y_mean, y_min, y_max = results
                 rows[y].append(y_mean)
                 rows[f"{y}-min"].append(y_min)
@@ -188,7 +186,7 @@ if __name__ == "__main__":
                 print(f"Benchmark #{i}:")
                 if schema.fixed_args:
                     print(
-                        f"Fixed args:",
+                        "Fixed args:",
                         ", ".join(f"{k}={v}" for k, v in schema.fixed_args.items()),
                     )
                 print(f"Metric: {schema.metric}")

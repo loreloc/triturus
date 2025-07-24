@@ -93,9 +93,7 @@ def _ker_vmax(
         tl.store(i_ptr + pid * STRIDE, pid * BLOCK_SIZE + j)
 
 
-def vmax(
-    x: torch.Tensor, *, block_size: int = 256
-) -> tuple[torch.Tensor, torch.Tensor]:
+def vmax(x: torch.Tensor, *, block_size: int = 256) -> tuple[torch.Tensor, torch.Tensor]:
     assert len(x.shape) == 1
     assert x.is_floating_point()
     assert x.is_contiguous()
@@ -118,9 +116,7 @@ def vmax(
         num_programs = triton.cdiv(n, block_size)
         # Launch the reduce kernel
         grid = (num_programs,)
-        _ker_vmax[grid](
-            stage_max, stage_max, stage_idx, m, BLOCK_SIZE=block_size, STRIDE=stride
-        )
+        _ker_vmax[grid](stage_max, stage_max, stage_idx, m, BLOCK_SIZE=block_size, STRIDE=stride)
         n = num_programs
         stride *= block_size
     return stage_max[0], stage_idx[0]
