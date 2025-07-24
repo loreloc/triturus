@@ -18,6 +18,6 @@ def test_lm2exp(allow_tf32: bool):
     assert torch.allclose(gt, gt_jit)
     c = lm2exp(a, b)
     if allow_tf32:
-        assert torch.allclose(gt, c, rtol=3e-3)
+        assert torch.allclose(gt, c, rtol=5e-4)
     else:
         assert torch.allclose(gt, c)
