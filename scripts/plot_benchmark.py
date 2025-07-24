@@ -128,13 +128,18 @@ def plot_benchmark_result(
         ax.plot(df[x_col], df[provider], label=provider)
     if show_legend:
         ax.legend()
-    fixed_args_repr = ", ".join(f"{k}={v}" for k, v in schema.fixed_args.items())
+    formatted_args = dict(
+        (k if len(k) > 1 else f"${k}$", v)
+        for k, v in args.items()
+    )
+    fixed_args_repr = ", ".join(f"{k}={v}" for k, v in formatted_args.items())
     if fixed_args_repr:
         title = f"{title} ({fixed_args_repr})"
-    title_wrapped = "\n".join(textwrap.wrap(title, width=42))
+    title_wrapped = "\n".join(textwrap.wrap(title, width=36))
     ax.set_title(title_wrapped)
     ax.set_xscale("log")
-    ax.set_xlabel(", ".join(x_names))
+    x_labels = [x if len(x) > 1 else f"${x}$" for x in x_names]
+    ax.set_xlabel(", ".join(x_labels))
     if show_y_label:
         ax.set_ylabel(y_label)
 
@@ -196,7 +201,7 @@ if __name__ == "__main__":
         filepath = os.path.join(results_path, f"{name}.pdf")
         print(f"Plotting benchmark '{name}' results to {filepath} ...")
         num_plots = len(dfs_schemas)
-        figsize = (5, 4) if num_plots == 1 else (4 * num_plots, 4)
+        figsize = (3.5, 3) if num_plots == 1 else (3 * num_plots, 3)
         fig, axs = plt.subplots(
             1,
             num_plots,
