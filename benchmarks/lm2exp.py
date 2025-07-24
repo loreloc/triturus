@@ -27,12 +27,12 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "k", "n"],
-            x_vals=[128, 192, 256, 512, 768, 1536, 2048, 4096],
+            x_vals=[128, 192, 256, 512, 768, 1536, 2048, 4096, 8192],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
             line_names=PROVIDERS,
-            ylabel="GiB/s",
+            ylabel="GB/s",
             plot_name=f"logmm2exp (square matrices, allow_tf32={allow_tf32})",
             args={"batch": 1, "allow_tf32": allow_tf32},
         )
@@ -41,12 +41,12 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "k"],
-            x_vals=[64, 96, 128, 192, 256, 512, 768, 1024],
+            x_vals=[64, 96, 128, 192, 256, 512, 768, 1024, 2048],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
             line_names=PROVIDERS,
-            ylabel="GiB/s",
+            ylabel="GB/s",
             plot_name=f"logmm2exp (rectangular matrices, n={n} batch={batch} allow_tf32={allow_tf32})",
             args={"n": n, "batch": batch, "allow_tf32": allow_tf32},
         )
@@ -62,7 +62,7 @@ CONFIGS = [
     #         line_arg="provider",
     #         line_vals=PROVIDERS,
     #         line_names=PROVIDERS,
-    #         ylabel="GiB/s",
+    #         ylabel="GB/s",
     #         plot_name=f"logmm2exp performance (rectangular matrices m={m} batch={batch}, allow_tf32={allow_tf32})",
     #         args={"m": m, "batch": batch, "allow_tf32": allow_tf32},
     #     )

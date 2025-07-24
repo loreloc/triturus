@@ -1,8 +1,11 @@
 import argparse
+import json
 import os
 import subprocess
 import textwrap
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -37,115 +40,13 @@ parser.add_argument(
     default=False,
     help="Whether to also print to stdout the benchmark results.",
 )
-
-
-class MarkWrapper:
-    def __init__(self, mark: Mark):
-        self._mark = mark
-
-    def _run(
-        self,
-        bench: Benchmark,
-        save_path: str,
-        show_plots: bool,
-        print_data: bool,
-        diff_col=False,
-        save_precision: int = 6,
-        **kwargs: Any,
-    ):
-        y_mean = bench.line_names
-        y_min = [f"{x}-min" for x in bench.line_names]
-        y_max = [f"{x}-max" for x in bench.line_names]
-        x_names = list(bench.x_names)
-        df = pd.DataFrame(columns=x_names + y_mean + y_min + y_max)
-        for x in bench.x_vals:
-            if not isinstance(x, (list, tuple)):
-                x = [x for _ in x_names]
-            if len(x) != len(x_names):
-                raise ValueError(f"Expected {len(x_names)} values, got {x}")
-            x_args = dict(zip(x_names, x))
-            row_mean, row_min, row_max = [], [], []
-            for y in bench.line_vals:
-                ret = self._mark.fn(
-                    **x_args, **{bench.line_arg: y}, **bench.args, **kwargs
-                )
-                try:
-                    y_mean, y_min, y_max = ret
-                except TypeError:
-                    y_mean, y_min, y_max = ret, None, None
-                row_mean += [y_mean]
-                row_min += [y_min]
-                row_max += [y_max]
-            df.loc[len(df)] = list(x) + row_mean + row_min + row_max
-        if bench.plot_name:
-            plt.figure()
-            ax = plt.subplot()
-            first_x = x_names[0]
-            for i, y in enumerate(bench.line_names):
-                y_min, y_max = df[y + "-min"], df[y + "-max"]
-                col = bench.styles[i][0] if bench.styles else None
-                sty = bench.styles[i][1] if bench.styles else None
-                ax.plot(df[first_x], df[y], label=y, color=col, ls=sty)
-                if not y_min.isnull().all() and not y_max.isnull().all():
-                    y_min = y_min.astype(float)
-                    y_max = y_max.astype(float)
-                    ax.fill_between(df[first_x], y_min, y_max, alpha=0.15, color=col)
-            ax.legend()
-            ax.set_xlabel(bench.xlabel or first_x)
-            ax.set_ylabel(bench.ylabel)
-            ax.set_xscale("log" if bench.x_log else "linear")
-            ax.set_yscale("log" if bench.y_log else "linear")
-            if show_plots:
-                plt.show()
-            if save_path:
-                plt.savefig(os.path.join(save_path, f"{bench.plot_name}.png"))
-        # df = df[x_names + bench.line_names]
-        if diff_col and df.shape[1] == 2:
-            col0, col1 = df.columns.tolist()
-            df["Diff"] = df[col1] - df[col0]
-        if print_data:
-            print(bench.plot_name + ":")
-            print(df.to_string())
-        if save_path:
-            df.to_csv(
-                os.path.join(save_path, f"{bench.plot_name}.csv"),
-                float_format=f"%.{save_precision}f",
-                index=False,
-            )
-        return df
-
-    def run(
-        self,
-        show_plots: bool = False,
-        print_data: bool = False,
-        save_path: str = "",
-        return_df: bool = False,
-        **kwargs: Any,
-    ):
-        has_single_bench = isinstance(self._mark.benchmarks, Benchmark)
-        benchmarks = (
-            [self._mark.benchmarks] if has_single_bench else self._mark.benchmarks
-        )
-        result_dfs = []
-        if save_path:
-            os.makedirs(save_path, exist_ok=True)
-            html = open(os.path.join(save_path, "results.html"), "w")
-            html.write("<html><body>\n")
-        for bench in benchmarks:
-            result_dfs.append(
-                self._run(bench, save_path, show_plots, print_data, **kwargs)
-            )
-            if save_path:
-                html.write(f'<image src="{bench.plot_name}.png"/>\n')
-        if save_path:
-            html.write("</body></html>\n")
-            html.close()
-        if return_df:
-            if has_single_bench:
-                return result_dfs[0]
-            else:
-                return result_dfs
-        return None
+parser.add_argument(
+    "--allow-tf32",
+    action="store_true",
+    default=False,
+    help="Whether to only plot results obtained with tf32, "
+    "if it is something specified for a benchmark",
+)
 
 
 def git_hash(short: bool = True) -> str:
@@ -156,23 +57,72 @@ def git_hash(short: bool = True) -> str:
     return subprocess.check_output(cmd).decode("ascii").strip()
 
 
+@dataclass
+class MarkSchema:
+    providers: list[str]
+    x_names: list[str]
+    fixed_args: dict[str, Any]
+    metric: str
+
+
+class MarkRunner:
+    def __init__(self, mark: Mark) -> None:
+        self._mark = mark
+
+    def _run(self, bench: Benchmark, **kwargs: Any) -> tuple[pd.DataFrame, MarkSchema]:
+        rows = defaultdict(list)
+        x_names = list(bench.x_names)
+        for x in bench.x_vals:
+            if not isinstance(x, (list, tuple)):
+                x = [x for _ in x_names]
+            if len(x) != len(x_names):
+                raise ValueError(f"Expected {len(x_names)} values, got {x}")
+            for x_name, x_val in zip(x_names, x):
+                rows[x_name].append(x_val)
+            x_args = dict(zip(x_names, x))
+            for y in bench.line_vals:
+                results = self._mark.fn(
+                    **x_args, **{bench.line_arg: y}, **bench.args, **kwargs
+                )
+                y_mean, y_min, y_max = results
+                rows[y].append(y_mean)
+                rows[f"{y}-min"].append(y_min)
+                rows[f"{y}-max"].append(y_max)
+        df = pd.DataFrame(rows)
+        schema = MarkSchema(
+            providers=bench.line_vals,
+            x_names=x_names,
+            fixed_args=bench.args,
+            metric=bench.ylabel,
+        )
+        return df, schema
+
+    def run(self, **kwargs: Any) -> list[tuple[pd.DataFrame, MarkSchema]]:
+        benchmarks: list[Benchmark]
+        if isinstance(self._mark.benchmarks, Benchmark):
+            benchmarks = [self._mark.benchmarks]
+        else:
+            benchmarks = self._mark.benchmarks
+        dfs_schemas: list[tuple[pd.DataFrame, MarkSchema]] = []
+        for bench in benchmarks:
+            dfs_schemas.append(self._run(bench, **kwargs))
+        return dfs_schemas
+
+
 def plot_benchmark_result(
     df: pd.DataFrame,
     args: Mapping[str, Any],
     providers: Sequence[str],
     x_names: Sequence[str],
     y_label: str,
-    title: str,
     *,
+    title: str,
     show_y_label: bool = True,
     show_legend: bool = True,
     ax: plt.Axes,
 ) -> None:
-    df = df.copy()
-    for args_name, args_val in args.items():
-        df[args_name] = args_val
-    ax.grid(linestyle="--", which="major", alpha=0.3, linewidth=0.5)
-    ax.grid(linestyle="--", which="minor", alpha=0.3, linewidth=0.3)
+    ax.grid(linestyle="--", which="major", alpha=0.35, linewidth=0.5)
+    ax.grid(linestyle="--", which="minor", alpha=0.35, linewidth=0.3)
     x_col = x_names[0]
     for provider in providers:
         y_min, y_max = df[provider + "-min"], df[provider + "-max"]
@@ -180,6 +130,9 @@ def plot_benchmark_result(
         ax.plot(df[x_col], df[provider], label=provider)
     if show_legend:
         ax.legend()
+    fixed_args_repr = ", ".join(f"{k}={v}" for k, v in schema.fixed_args.items())
+    if fixed_args_repr:
+        title = f"{title} ({fixed_args_repr})"
     title_wrapped = "\n".join(textwrap.wrap(title, width=42))
     ax.set_title(title_wrapped)
     ax.set_xscale("log")
@@ -193,57 +146,75 @@ if __name__ == "__main__":
     names: list[str] = args.names
     if len(names) == 1 and names[0] == "*":
         names = list(BENCHMARKS.keys())
+    allow_tf32: bool = args.allow_tf32
     print_results: bool = args.print_results
     results_path: str = f"results-{git_hash()}"
-    os.makedirs(results_path, exist_ok=True)
     for name in names:
         if name not in BENCHMARKS:
             raise ValueError(f"Unknown benchmark name '{name}'")
+    os.makedirs(results_path, exist_ok=True)
+
+    # Run benchmarks, retrieve the results and serialize them
+    for name in names:
+        filepath = os.path.join(results_path, f"{name}.json")
+        if os.path.isfile(filepath):
+            print(f"Using cached '{name}' benchmark results at {filepath} ...")
+            continue
         mark = BENCHMARKS[name]
         benchmarks = mark.benchmarks
         print(f"Running benchmark '{name}' ...")
-        results: pd.DataFrame | Sequence[pd.DataFrame] = MarkWrapper(mark).run(
-            print_data=print_results, return_df=True
-        )
-        dfs: list[pd.DataFrame] = (
-            [results] if isinstance(results, pd.DataFrame) else list(results)
-        )
+        dfs_schemas = MarkRunner(mark).run()
+        data_json: list[dict[str, Any]] = []
+        for df, schema in dfs_schemas:
+            data_json.append({"schema": asdict(schema), "results": df.to_dict()})
+        with open(filepath, "w") as fp:
+            json.dump(data_json, fp)
+
+    # Read the results and plot them
+    for name in names:
+        filepath = os.path.join(results_path, f"{name}.json")
+        print(f"Loading benchmark '{name}' results from {filepath} ...")
+        with open(filepath, "r") as fp:
+            data_json = json.load(fp)
+        dfs_schemas: list[tuple[pd.DataFrame, MarkSchema]] = []
+        for i, row_json in enumerate(data_json):
+            schema = MarkSchema(**row_json["schema"])
+            df = pd.DataFrame(row_json["results"])
+            if "allow_tf32" in schema.fixed_args:
+                if schema.fixed_args["allow_tf32"] != allow_tf32:
+                    continue
+                del schema.fixed_args["allow_tf32"]
+            if print_results:
+                print(f"Benchmark #{i}:")
+                if schema.fixed_args:
+                    print(
+                        f"Fixed args:",
+                        ", ".join(f"{k}={v}" for k, v in schema.fixed_args.items()),
+                    )
+                print(f"Metric: {schema.metric}")
+                print("Results:")
+                print(df)
+            dfs_schemas.append((df, schema))
         filepath = os.path.join(results_path, f"{name}.pdf")
         print(f"Plotting benchmark '{name}' results to {filepath} ...")
-        figsize = (5, 4) if len(dfs) == 1 else (4 * len(dfs), 4)
+        num_plots = len(dfs_schemas)
+        figsize = (5, 4) if num_plots == 1 else (4 * num_plots, 4)
         fig, axs = plt.subplots(
             1,
-            len(dfs),
+            num_plots,
             figsize=figsize,
             layout="constrained",
             sharey=True,
             squeeze=False,
         )
-        y_labels = set(b.ylabel for b in benchmarks)
-        providers = set(tuple(b.line_names) for b in benchmarks)
-        if len(y_labels) != 1:
-            raise ValueError(
-                f"Benchmark '{name}' runs should have the same metric"
-                f" (i.e., the ylabel), but found {y_labels}"
-            )
-        if len(providers) != 1:
-            raise ValueError(
-                f"Benchmark '{name}' runs should have the same providers"
-                f" (i.e., the line names), but found {providers}"
-            )
-        (y_label,) = tuple(y_labels)
-        (providers,) = tuple(providers)
-        for i, df in enumerate(dfs):
-            if print_results:
-                print(df)
-            benchmark = benchmarks[i]
+        for i, (df, schema) in enumerate(dfs_schemas):
             plot_benchmark_result(
                 df,
-                benchmark.args,
-                providers,
-                benchmark.x_names,
-                y_label,
-                benchmark.plot_name,
+                schema.fixed_args,
+                schema.providers,
+                schema.x_names,
+                schema.metric,
+                title=name,
                 show_y_label=i == 0,
                 show_legend=i == 0,
                 ax=axs[0, i],
