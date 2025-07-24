@@ -125,13 +125,10 @@ def plot_benchmark_result(
     for provider in providers:
         y_min, y_max = df[provider + "-min"], df[provider + "-max"]
         ax.fill_between(df[x_col], y_min, y_max, alpha=0.2)
-        ax.plot(df[x_col], df[provider], label=provider)
+        ax.plot(df[x_col], df[provider], label=provider, alpha=0.8)
     if show_legend:
         ax.legend()
-    formatted_args = dict(
-        (k if len(k) > 1 else f"${k}$", v)
-        for k, v in args.items()
-    )
+    formatted_args = dict((k if len(k) > 1 else f"${k}$", v) for k, v in args.items())
     fixed_args_repr = ", ".join(f"{k}={v}" for k, v in formatted_args.items())
     if fixed_args_repr:
         title = f"{title} ({fixed_args_repr})"
