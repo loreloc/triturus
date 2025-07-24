@@ -88,7 +88,7 @@ CONFIGS = [
 ]
 
 
-@triton.autotune(configs=CONFIGS, key=["m", "k", "n"])
+@triton.autotune(configs=CONFIGS, key=["m", "k", "n", "ALLOW_TF32"])
 @triton.jit
 def _ker_mm(
     a_ptr,  # A pointer to a M x K matrix (A)
@@ -144,7 +144,7 @@ def _ker_mm(
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
-    for h in range(num_blocks - 1):
+    for _ in range(num_blocks - 1):
         # Load the blocks
         a_block = tl.load(a_ptrs)
         b_block = tl.load(b_ptrs)

@@ -2,7 +2,7 @@ import torch
 import triton
 import triton.language as tl
 
-from triturus.utils import cast_fp32_to_tf32, is_triturus_tf32_enabled
+from triturus.utils import is_triturus_tf32_enabled
 
 CONFIGS = [
     triton.Config(
@@ -58,12 +58,12 @@ CONFIGS = [
 ]
 
 
-@triton.autotune(configs=CONFIGS, key=["batch", "m", "k", "n"])
+@triton.autotune(configs=CONFIGS, key=["batch", "m", "k", "n", "ALLOW_TF32"])
 @triton.jit
 def _ker_lm2exp(
-    a_ptr,  # A pointer to a batch x M x K matrix (A)
-    b_ptr,  # A pointer to a batch x K x N matrix (B)
-    c_ptr,  # A pointer to a batch x M x N matrix (C)
+    a_ptr,  # A pointer to a batch x M x K tensor (A)
+    b_ptr,  # A pointer to a batch x K x N tensor (B)
+    c_ptr,  # A pointer to a batch x M x N tensor (C)
     a_str0,  # The stride of A along axis=0
     a_str1,  # The stride of A along axis=1
     a_str2,  # The stride of A along axis=2
@@ -147,9 +147,6 @@ def _ker_lm2exp(
         # ... but first subtract the maximum values for numerical stability
         b_block_exp = tl.exp(b_block - max_block)
         # Compute the dot product of blocks
-        if ALLOW_TF32:
-            a_block = cast_fp32_to_tf32(a_block)
-            b_block_exp = cast_fp32_to_tf32(b_block_exp)
         acc = tl.dot(
             a_block,
             b_block_exp,
@@ -186,7 +183,7 @@ def lm2exp(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         * triton.cdiv(b.shape[2], meta["BLOCK_SIZE_N"]),
     )
     # Compute the tile size, which will be used to compute the maximum along multiple block columns in B
-    tile_size = triton.next_power_of_2(b.shape[0])
+    tile_size = triton.next_power_of_2(b.shape[1])
     # Launch the kernel
     allow_tf32 = is_triturus_tf32_enabled()
     _ker_lm2exp[grid](

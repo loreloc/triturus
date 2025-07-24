@@ -48,6 +48,7 @@ def is_torch_tf32_enabled() -> bool:
 
 
 def is_triturus_tf32_enabled() -> bool:
+    global _TRITURUS_TF32_ENABLED
     return _TRITURUS_TF32_ENABLED
 
 

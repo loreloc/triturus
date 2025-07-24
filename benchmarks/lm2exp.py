@@ -27,13 +27,13 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "k", "n"],
-            x_vals=[128, 192, 256, 512, 768, 1536, 2048, 4096, 8192],
+            x_vals=[128, 192, 256, 512, 768, 1536, 2048],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
             line_names=PROVIDERS,
             ylabel="GB/s",
-            plot_name=f"logmm2exp (square matrices, allow_tf32={allow_tf32})",
+            plot_name=f"lm2exp (square matrices, allow_tf32={allow_tf32})",
             args={"batch": 1, "allow_tf32": allow_tf32},
         )
         for allow_tf32 in [False, True]
@@ -41,13 +41,13 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "k"],
-            x_vals=[64, 96, 128, 192, 256, 512, 768, 1024, 2048],
+            x_vals=[64, 96, 128, 192, 256, 512, 768, 1024],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
             line_names=PROVIDERS,
             ylabel="GB/s",
-            plot_name=f"logmm2exp (rectangular matrices, n={n} batch={batch} allow_tf32={allow_tf32})",
+            plot_name=f"lm2exp (rectangular matrices, n={n} batch={batch} allow_tf32={allow_tf32})",
             args={"n": n, "batch": batch, "allow_tf32": allow_tf32},
         )
         for batch in [64, 384]
@@ -57,7 +57,7 @@ CONFIGS = [
     # *tuple(
     #     triton.testing.Benchmark(
     #         x_names=["n", "k"],
-    #         x_vals=[64, 128, 256, 512, 1024],
+    #         x_vals=[64, 96, 128, 192, 256, 512, 768, 1024, 2048],
     #         x_log=True,
     #         line_arg="provider",
     #         line_vals=PROVIDERS,
@@ -66,7 +66,7 @@ CONFIGS = [
     #         plot_name=f"logmm2exp performance (rectangular matrices m={m} batch={batch}, allow_tf32={allow_tf32})",
     #         args={"m": m, "batch": batch, "allow_tf32": allow_tf32},
     #     )
-    #     for batch in [24, 96, 384]
+    #     for batch in [64, 384]
     #     for m in [256]
     #     for allow_tf32 in [False, True]
     # ),

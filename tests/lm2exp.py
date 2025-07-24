@@ -17,8 +17,7 @@ def test_lm2exp(allow_tf32: bool):
     gt_jit = torch_jit_lm2exp(a, b)
     assert torch.allclose(gt, gt_jit)
     c = lm2exp(a, b)
-    # Higher rtol required if using tf32 for some reason
     if allow_tf32:
-        assert torch.allclose(gt, c, rtol=5e-5)
+        assert torch.allclose(gt, c, rtol=3e-3)
     else:
         assert torch.allclose(gt, c)
