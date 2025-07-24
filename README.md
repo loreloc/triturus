@@ -22,17 +22,17 @@ The following table describes the implemented kernels.
 
 ### Benchmark of vmax
 
-![vmax](https://picsum.photos/400/400?random=1)
+![vmax](https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-vmax.png)
 
 ### Benchmark of matmax
 
-![matmax](https://picsum.photos/350/400?random=2)
+![matmax](https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-matmax.png)
 
 ### Benchmark of mm
 
-![mm](https://picsum.photos/350/400?random=3)
+![mm](https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-mm.png)
 
 ### Benchmark of lm2exp
 
-![lm2exp](https://picsum.photos/350/400?random=4)
+![lm2exp](https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-lm2exp.png)
 
