@@ -41,7 +41,7 @@ def benchmark_vadd(n, provider) -> tuple[float, float, float]:
         case _:
             assert False, provider
     ms, min_ms, max_ms = triton.testing.do_bench(fn, quantiles=QUANTILES)
-    return eval_tflops(n, ms), eval_tflops(n, min_ms), eval_tflops(n, max_ms)
+    return eval_tflops(n, ms), eval_tflops(n, max_ms), eval_tflops(n, min_ms)
 
 
 if __name__ == "__main__":

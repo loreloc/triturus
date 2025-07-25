@@ -47,8 +47,8 @@ def benchmark_mm(m, k, n, provider, *, allow_tf32: bool = False) -> tuple[float,
     nflops = m * n * (2 * k - 1)
     return (
         eval_tflops(nflops, ms),
-        eval_tflops(nflops, min_ms),
         eval_tflops(nflops, max_ms),
+        eval_tflops(nflops, min_ms),
     )
 
 

@@ -82,8 +82,8 @@ def benchmark_matmax(m, n, provider, axis) -> tuple[float, float, float]:
     nflops = n * (m - 1) if axis == 0 else m * (n - 1)
     return (
         eval_tflops(nflops, ms),
-        eval_tflops(nflops, min_ms),
         eval_tflops(nflops, max_ms),
+        eval_tflops(nflops, min_ms),
     )
 
 

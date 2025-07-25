@@ -27,6 +27,7 @@ def ensure_reproducibility(
         torch.use_deterministic_algorithms(True, warn_only=True)
         torch.backends.cudnn.benchmark = False
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
+    torch._dynamo.config.recompile_limit = 32
 
 
 def set_tf32_enabled(allow_tf32: bool):

@@ -111,24 +111,22 @@ def _ker_lm2exp(
     tl.assume(c_str0 > 0)
     tl.assume(c_str1 > 0)
     tl.assume(c_str2 > 0)
-    # Move the pointers based on the batch program id
-    a_ptr += pid_batch * a_str0
-    b_ptr += pid_batch * b_str0
-    c_ptr += pid_batch * c_str0
     # Compute the number of blocks to multiply and accumulate, and the block indices
     num_blocks = tl.cdiv(k, BLOCK_SIZE_K)
     block_idx_k = tl.arange(0, BLOCK_SIZE_K)
-    # Compute the pointers to the starting blocks of A (along axis=0) and B (along axis=1)
+    # Compute the pointers to the starting blocks of A (along axis=1) and B (along axis=2)
     a_offs1 = (pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % m
     b_offs2 = (pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % n
+    # Move the pointers based on the batch program id,
+    # and based on the offsets for A and B
+    a_ptrs = a_ptr + pid_batch * a_str0 + a_offs1[:, None] * a_str1 + block_idx_k[None, :] * a_str2
+    b_ptrs = b_ptr + pid_batch * b_str0 + b_offs2[None, :] * b_str2
     # Compute the maximum values
     tile_idx = tl.arange(0, TILE_SIZE) % k
-    b_tile_ptrs = b_ptr + tile_idx[:, None] * b_str1 + b_offs2[None, :] * b_str2
-    b_tile = tl.load(b_tile_ptrs)
+    b_tile = tl.load(b_ptrs + tile_idx[:, None] * b_str1)
     max_block = tl.clamp(tl.max(b_tile, axis=0), -1e38, 1e38)
-    # Multiply by the strides for A and B along axes 1 and 2 as to retrieve the pointers
-    a_ptrs = a_ptr + a_offs1[:, None] * a_str1 + block_idx_k[None, :] * a_str2
-    b_ptrs = b_ptr + block_idx_k[:, None] * b_str1 + b_offs2[None, :] * b_str2
+    # Move the pointers for B before the dot products loop
+    b_ptrs += block_idx_k[:, None] * b_str1
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
@@ -159,9 +157,8 @@ def _ker_lm2exp(
         b_ptrs += BLOCK_SIZE_K * b_str1
     # Compute the logarithm of the accumulator, and add the maximum values back
     log_acc = max_block + tl.log(acc)
-    # Compute the pointers where to store the accumulator values
-    c_ptrs = c_ptr + a_offs1[:, None] * c_str1 + b_offs2[None, :] * c_str2
     # Store the block accumulator, and use masks
+    c_ptrs = c_ptr + pid_batch * c_str0 + a_offs1[:, None] * c_str1 + b_offs2[None, :] * c_str2
     block_mask1 = a_offs1 < m
     block_mask2 = b_offs2 < n
     tl.store(c_ptrs, log_acc, mask=block_mask1[:, None] & block_mask2[None, :])

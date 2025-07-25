@@ -95,8 +95,8 @@ def benchmark_lm2exp(
     size = batch * (m * k + k * n)
     return (
         eval_gbps(size, ms),
-        eval_gbps(size, min_ms),
         eval_gbps(size, max_ms),
+        eval_gbps(size, min_ms),
     )
 
 
