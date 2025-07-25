@@ -14,6 +14,7 @@ from triton.testing import Benchmark, Mark
 
 from benchmarks.add import benchmark_vadd
 from benchmarks.lm2exp import benchmark_lm2exp
+from benchmarks.lt2exp import benchmark_lt2exp
 from benchmarks.max import benchmark_matmax, benchmark_vmax
 from benchmarks.mm import benchmark_mm
 
@@ -23,6 +24,7 @@ BENCHMARKS: Mapping[str, Mark] = {
     "matmax": benchmark_matmax,
     "mm": benchmark_mm,
     "lm2exp": benchmark_lm2exp,
+    "lt2exp": benchmark_lt2exp,
 }
 
 
