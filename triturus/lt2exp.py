@@ -13,7 +13,7 @@ CONFIGS = [
     triton.Config(
         {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_JK": 32, "GROUP_SIZE": 8},
         num_stages=6,
-        num_warps=2,
+        num_warps=1,
     ),
     triton.Config(
         {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_JK": 16, "GROUP_SIZE": 8},
@@ -189,24 +189,24 @@ def lt2exp(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     assert len(w.shape) == 4
     assert len(a.shape) == len(b.shape) == 3
     assert w.shape[0] == a.shape[0] == b.shape[0]
-    assert w.shape[2] * w.shape[3] == a.shape[1] * b.shape[1]
+    assert w.shape[2] == a.shape[1]
+    assert w.shape[3] == b.shape[1]
     assert a.shape[2] == b.shape[2]
     assert w.dtype == a.dtype == b.dtype == torch.float32
     assert w.device == a.device == b.device
+    batch, m, j, k, n = w.shape[0], w.shape[1], w.shape[2], w.shape[3], a.shape[2]
 
     # Allocate the result tensor, on the same device
-    c = torch.empty((w.shape[0], w.shape[1], a.shape[2]), dtype=a.dtype, device=a.device)
-    # Reshape the weights tensor as to flatten the last two dimensions
-    w = w.view(w.shape[0], w.shape[1], -1)
+    c = torch.empty((batch, m, n), dtype=a.dtype, device=a.device)
     # Specify how to compute the number of programs required in the grid
     grid = lambda meta: (
-        w.shape[0]
-        * triton.cdiv(w.shape[1], meta["BLOCK_SIZE_M"])
-        * triton.cdiv(a.shape[2], meta["BLOCK_SIZE_N"]),
+        batch * triton.cdiv(m, meta["BLOCK_SIZE_M"]) * triton.cdiv(n, meta["BLOCK_SIZE_N"]),
     )
     # Compute the tile sizes, which will be used to compute the maximum along multiple block columns in A and B
-    a_tile_size = triton.next_power_of_2(a.shape[1])
-    b_tile_size = triton.next_power_of_2(b.shape[1])
+    a_tile_size = triton.next_power_of_2(j)
+    b_tile_size = triton.next_power_of_2(k)
+    # Reshape the weights tensor as to flatten the last two dimensions
+    w = w.view(batch, m, -1)
     # Launch the kernel
     allow_tf32 = is_triturus_tf32_enabled()
     _ker_lt2exp[grid](
@@ -226,11 +226,11 @@ def lt2exp(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         c.stride(0),
         c.stride(1),
         c.stride(2),
-        w.shape[0],
-        w.shape[1],
-        a.shape[1],
-        b.shape[1],
-        a.shape[2],
+        batch,
+        m,
+        j,
+        k,
+        n,
         A_TILE_SIZE=a_tile_size,
         B_TILE_SIZE=b_tile_size,
         ALLOW_TF32=allow_tf32,
