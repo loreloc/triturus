@@ -262,19 +262,45 @@ CONFIGS_SPLIT = [
     *tuple(
         triton.Config(
             {
-                "BLOCK_SIZE_M": bs,
-                "BLOCK_SIZE_N": bs,
-                "BLOCK_SIZE_INNER": bsi,
+                "BLOCK_SIZE_M": 16,
+                "BLOCK_SIZE_N": 16,
+                "BLOCK_SIZE_INNER": 32,
+                "GROUP_SIZE": 4,
+                "NUM_SPLITS": ns,
+            },
+            num_stages=6,
+            num_warps=2,
+        )
+        for ns in [2, 4, 8]
+    ),
+    *tuple(
+        triton.Config(
+            {
+                "BLOCK_SIZE_M": 32,
+                "BLOCK_SIZE_N": 32,
+                "BLOCK_SIZE_INNER": 32,
+                "GROUP_SIZE": 4,
+                "NUM_SPLITS": ns,
+            },
+            num_stages=5,
+            num_warps=4,
+        )
+        for ns in [2, 4, 8]
+    ),
+    *tuple(
+        triton.Config(
+            {
+                "BLOCK_SIZE_M": 64,
+                "BLOCK_SIZE_N": 64,
+                "BLOCK_SIZE_INNER": 32,
                 "GROUP_SIZE": 4,
                 "NUM_SPLITS": ns,
             },
             num_stages=4,
-            num_warps=4,
+            num_warps=8,
         )
-        for ns in [4, 8, 16]
-        for bsi in [16, 32]
-        for bs in [16, 32]
-    )
+        for ns in [4, 8, 12]
+    ),
 ]
 
 
