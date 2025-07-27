@@ -1,4 +1,5 @@
 import itertools
+from typing import Any, cast
 
 import torch
 import triton
@@ -8,52 +9,67 @@ from triturus.utils import is_triturus_tf32_enabled
 
 CONFIGS = [
     triton.Config(
-        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INN": 16, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        num_stages=5,
+        num_warps=1,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        num_stages=5,
+        num_warps=1,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        num_stages=5,
+        num_warps=1,
+    ),
+    triton.Config(
+        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INNER": 16, "GROUP_SIZE": 8},
         num_stages=6,
         num_warps=1,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INN": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
         num_stages=6,
         num_warps=1,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INN": 16, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 16, "GROUP_SIZE": 8},
         num_stages=5,
         num_warps=2,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INN": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
         num_stages=4,
         num_warps=2,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INN": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
         num_stages=4,
         num_warps=4,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INN": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
         num_stages=5,
         num_warps=4,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INN": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
         num_stages=4,
         num_warps=8,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INN": 64, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 64, "GROUP_SIZE": 8},
         num_stages=4,
         num_warps=8,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INN": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
         num_stages=3,
         num_warps=8,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INN": 64, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 64, "GROUP_SIZE": 8},
         num_stages=3,
         num_warps=8,
     ),
@@ -86,7 +102,7 @@ def _ker_lt2exp(
     n: int,
     BLOCK_SIZE_M: tl.constexpr,  # The block size along axis=1 of W
     BLOCK_SIZE_N: tl.constexpr,  # The block size along axis=2 of A (or B)
-    BLOCK_SIZE_INN: tl.constexpr,  # The block size along the dimension to contract
+    BLOCK_SIZE_INNER: tl.constexpr,  # The block size along the dimension to contract
     GROUP_SIZE: tl.constexpr,  # The group size used for swizzling
     A_TILE_SIZE: tl.constexpr,  # The size of a tile column of A, i.e., next_power_of_2(j)
     B_TILE_SIZE: tl.constexpr,  # The size of a tile column of B, i.e., next_power_of_2(k)
@@ -123,8 +139,8 @@ def _ker_lt2exp(
     tl.assume(c_str1 > 0)
     tl.assume(c_str2 > 0)
     # Compute the number of blocks to multiply and accumulate, and the block indices
-    num_blocks = tl.cdiv(j * k, BLOCK_SIZE_INN)
-    block_idx = tl.arange(0, BLOCK_SIZE_INN)
+    num_blocks = tl.cdiv(j * k, BLOCK_SIZE_INNER)
+    block_idx = tl.arange(0, BLOCK_SIZE_INNER)
     # Compute the pointers to the starting blocks of W (along axis=1)
     w_offs1 = (pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % m
     # Compute the pointers to the starting blocks of A and B (along axis=2 for both)
@@ -146,8 +162,8 @@ def _ker_lt2exp(
     acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
     for h in range(num_blocks):
-        block_idx_h = block_idx + h * BLOCK_SIZE_INN
-        block_idx_h = tl.max_contiguous(block_idx_h, BLOCK_SIZE_INN)
+        block_idx_h = block_idx + h * BLOCK_SIZE_INNER
+        block_idx_h = tl.max_contiguous(block_idx_h, BLOCK_SIZE_INNER)
         a_block_idx = block_idx_h // k
         b_block_idx = block_idx_h % k
         a_offs1 = a_block_idx[:, None] * a_str1
@@ -162,7 +178,7 @@ def _ker_lt2exp(
             mask = block_idx_h < j * k
             w = tl.load(w_ptrs, mask=mask[None, :], other=0.0)
             # Load the values of A, and handle out of bounds using masks
-            a_block = tl.load(a_ptrs + a_offs1, mask=mask[:, None], other=0.0)
+            a_block = tl.load(a_ptrs + a_offs1, mask=mask[:, None], other=float("-inf"))
         # Load the values of B
         b_block = tl.load(b_ptrs + b_offs1)
         # Exponentiate the values in the A and B matrices ...
@@ -177,7 +193,7 @@ def _ker_lt2exp(
             input_precision=PRECISION,
         )
         # Move the pointers for B along axis=2 by the block size
-        w_ptrs += BLOCK_SIZE_INN * w_str2
+        w_ptrs += BLOCK_SIZE_INNER * w_str2
     # Compute the logarithm of the accumulator, and add the maximum values back
     log_acc = a_max_block + b_max_block + tl.log(acc)
     # Store the block accumulator, and use masks
@@ -244,7 +260,6 @@ def lt2exp(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 @triton.autotune(
     configs=CONFIGS,
     key=["batch", "m", "j", "k", "n", "NUM_BLOCKS", "ALLOW_TF32"],
-    reset_to_zero=["c_ptr"],
 )
 @triton.jit
 def _ker_lt2exp_split(
@@ -277,7 +292,7 @@ def _ker_lt2exp_split(
     n: int,
     BLOCK_SIZE_M: tl.constexpr,  # The block size along axis=1 of W
     BLOCK_SIZE_N: tl.constexpr,  # The block size along axis=2 of A (or B)
-    BLOCK_SIZE_INN: tl.constexpr,  # The block size along the dimension to contract
+    BLOCK_SIZE_INNER: tl.constexpr,  # The block size along the dimension to contract
     GROUP_SIZE: tl.constexpr,  # The group size used for swizzling
     NUM_BLOCKS: tl.constexpr,  # The number of block dot products each program computes
     ALLOW_TF32: tl.constexpr,  # Whether to allow tf32
@@ -294,6 +309,7 @@ def _ker_lt2exp_split(
     pid_j = (pid % num_programs12) % num_programs2
     pid_i, pid_j = tl.swizzle2d(pid_i, pid_j, num_programs1, num_programs2, GROUP_SIZE)
     pid_k = tl.program_id(axis=1)
+    num_programs_inn = tl.num_programs(axis=1)
     # Some hints to the compiler
     tl.assume(pid_batch >= 0)
     tl.assume(pid_i >= 0)
@@ -323,8 +339,9 @@ def _ker_lt2exp_split(
     # and based on the offsets for W, A, B, C
     block_idx1 = tl.arange(0, BLOCK_SIZE_M)
     block_idx2 = tl.arange(0, BLOCK_SIZE_N)
-    block_idx = pid_k * NUM_BLOCKS * BLOCK_SIZE_INN + tl.arange(0, BLOCK_SIZE_INN)
-    block_idx = tl.max_contiguous(block_idx, BLOCK_SIZE_INN)
+    interleaved_chunk_size = num_programs_inn * BLOCK_SIZE_INNER
+    block_idx = pid_k * BLOCK_SIZE_INNER + tl.arange(0, BLOCK_SIZE_INNER)
+    block_idx = tl.max_contiguous(block_idx, BLOCK_SIZE_INNER)
     w_offs1 = (pid_i * BLOCK_SIZE_M + block_idx1) % m
     ab_offs2 = (pid_j * BLOCK_SIZE_N + block_idx2) % n
     w_ptrs = w_ptr + pid_batch * w_str0 + w_offs1[:, None] * w_str1 + block_idx[None, :] * w_str2
@@ -339,8 +356,8 @@ def _ker_lt2exp_split(
     acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
     for h in range(NUM_BLOCKS):
-        block_idx_h = block_idx + h * BLOCK_SIZE_INN
-        block_idx_h = tl.max_contiguous(block_idx_h, BLOCK_SIZE_INN)
+        block_idx_h = block_idx + h * interleaved_chunk_size
+        block_idx_h = tl.max_contiguous(block_idx_h, BLOCK_SIZE_INNER)
         # Load the weights, and handle out of bounds using masks
         mask = block_idx_h < j * k
         w = tl.load(w_ptrs, mask=mask[None, :], other=0.0)
@@ -363,7 +380,7 @@ def _ker_lt2exp_split(
             input_precision=PRECISION,
         )
         # Move the pointers for B along axis=2 by the block size
-        w_ptrs += BLOCK_SIZE_INN * w_str2
+        w_ptrs += interleaved_chunk_size * w_str2
     # Atomically add the accumulated results
     # Here we are using the 'relaxed' semantic (which is the fastest), because in this case
     # we do not care about the ordering of the previous operations or the ordering of atomic sum operations
@@ -372,6 +389,16 @@ def _ker_lt2exp_split(
     c_ptrs = c_ptr + pid_batch * c_str0 + c_offs1[:, None] * c_str1 + c_offs2[None, :] * c_str2
     c_mask = (c_offs1 < m)[:, None] & (c_offs2 < n)[None, :]
     tl.atomic_add(c_ptrs, acc, mask=c_mask, sem="relaxed")
+
+
+# The hook used to fill the output tensor with zeros
+def _ker_lt2exp_split_zeros_(*args: Any, **_: Any) -> None:
+    c = cast(torch.Tensor, args[3])
+    c.zero_()
+
+
+# Add the above hook to the lt2exp split kernel
+_ker_lt2exp_split.fn.add_pre_run_hook(_ker_lt2exp_split_zeros_)
 
 
 @triton.autotune(
@@ -428,24 +455,19 @@ def _ker_lt2exp_log_add_max(
     tl.assume(b_max_str0 > 0)
     tl.assume(b_max_str1 > 0)
     # Compute the offsets of the block of C to operate on
-    c_offs1 = pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    c_offs2 = pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-    c_offs1 = tl.max_contiguous(c_offs1, BLOCK_SIZE_M)
-    c_offs2 = tl.max_contiguous(c_offs2, BLOCK_SIZE_N)
-    c_mask1 = c_offs1 < m
-    c_mask2 = c_offs2 < n
+    c_offs1 = (pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % m
+    c_offs2 = (pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % n
     # Load the maximum blocks of A and B, using masks
     a_max_ptrs = a_max_ptr + pid_batch * a_max_str0 + c_offs2 * a_max_str1
     b_max_ptrs = b_max_ptr + pid_batch * b_max_str0 + c_offs2 * b_max_str1
-    a_max_block = tl.load(a_max_ptrs, mask=c_mask2, other=0.0)
-    b_max_block = tl.load(b_max_ptrs, mask=c_mask2, other=0.0)
+    a_max_block = tl.load(a_max_ptrs)
+    b_max_block = tl.load(b_max_ptrs)
     # Load the block of C, compute its logarithm and add back the maximum values of A and B
     c_ptrs = c_ptr + pid_batch * c_str0 + c_offs1[:, None] * c_str1 + c_offs2[None, :] * c_str2
-    c_mask = c_mask1[:, None] & c_mask2[None, :]
-    c_block = tl.load(c_ptrs, mask=c_mask, other=0.0)
+    c_block = tl.load(c_ptrs)
     c_block = a_max_block + b_max_block + tl.log(c_block)
     # Store the results back to C (this is an in-place kernel)
-    tl.store(c_ptrs, c_block, mask=c_mask)
+    tl.store(c_ptrs, c_block)
 
 
 def lt2exp_split(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -463,14 +485,14 @@ def lt2exp_split(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Ten
     a_max = torch.amax(a, dim=1)
     b_max = torch.amax(b, dim=1)
     # Allocate the result tensor, on the same device
-    c = torch.zeros((batch, m, n), dtype=a.dtype, device=a.device)
+    c = torch.empty((batch, m, n), dtype=a.dtype, device=a.device)
     # Make each program computes a relatively small number of blocks, if no batch dimension
     # Otherwise, increase the number of block dot products computed by each program
     # This is because the batch dimension already increases the number of programs (see below)
     NUM_BLOCKS = 32 if batch == 1 else 128
     grid = lambda meta: (
         batch * triton.cdiv(m, meta["BLOCK_SIZE_M"]) * triton.cdiv(n, meta["BLOCK_SIZE_N"]),
-        triton.cdiv(j * k, meta["BLOCK_SIZE_INN"] * NUM_BLOCKS),
+        triton.cdiv(j * k, meta["BLOCK_SIZE_INNER"] * NUM_BLOCKS),
     )
     # Reshape the weights tensor as to flatten the last two dimensions
     w = w.view(batch, m, -1)
