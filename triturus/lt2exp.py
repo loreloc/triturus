@@ -446,7 +446,7 @@ def lt2exp_split(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Ten
     batch, m, j, k, n = w.shape[0], w.shape[1], w.shape[2], w.shape[3], a.shape[2]
 
     # Allocate the lock
-    MIN_BLOCK_SIZE = 32
+    MIN_BLOCK_SIZE = 16
     lock = torch.empty(
         batch,
         triton.cdiv(m, MIN_BLOCK_SIZE),
