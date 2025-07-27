@@ -168,12 +168,12 @@ def _ker_mm(
         a_block = cast_fp32_to_tf32(a_block)
         b_block = cast_fp32_to_tf32(b_block)
     acc = tl.dot(a_block, b_block, acc=acc, input_precision=PRECISION)
-    # Compute the pointers where to store the accumulator values
-    c_ptrs = c_ptr + a_offs0[:, None] * c_str0 + b_offs1[None, :] * c_str1
     # Store the block accumulator, and use masks
-    block_mask0 = a_offs0 < m
-    block_mask1 = b_offs1 < n
-    tl.store(c_ptrs, acc, mask=block_mask0[:, None] & block_mask1[None, :])
+    c_offs0 = pid_i * BLOCK_SIZE + block_idx
+    c_offs1 = pid_j * BLOCK_SIZE + block_idx
+    c_ptrs = c_ptr + c_offs0[:, None] * c_str0 + c_offs1[None, :] * c_str1
+    c_mask = (c_offs0 < m)[:, None] & (c_offs1 < n)[None, :]
+    tl.store(c_ptrs, acc, mask=c_mask)
 
 
 def mm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
