@@ -288,10 +288,10 @@ def _ker_lt2exp_split(
     a_ptr,  # A pointer to a batch x J x N tensor (A)
     b_ptr,  # A pointer to a batch x K x N tensor (B)
     c_ptr,  # A pointer to a batch x M x N tensor (C)
-    lock_ptr,
-    l_str0,
-    l_str1,
-    l_str2,
+    lock_ptr,  # A pointer to a batch x R x S tensor containing lock entries
+    l_str0,  # The stride of the lock along axis=0
+    l_str1,  # The stride of the lock along axis=1
+    l_str2,  # The stride of the lock along axis=2
     w_str0,  # The stride of W along axis=0
     w_str1,  # The stride of W along axis=1
     w_str2,  # The stride of W along axis=2
@@ -382,7 +382,6 @@ def _ker_lt2exp_split(
         block_idx_h = block_idx + h * INTERLEAVED_TILE_SIZE
         block_idx_h = tl.max_contiguous(block_idx_h, BLOCK_SIZE_INNER)
         # Load the weights, and handle out of bounds using masks
-        mask = block_idx_h < j * k
         # Load the values of A and B, and handle out of bounds using masks
         a_block_idx = block_idx_h // k
         b_block_idx = block_idx_h % k
@@ -392,6 +391,7 @@ def _ker_lt2exp_split(
             w = tl.load(w_ptrs)
             a_block = tl.load(a_ptrs + a_offs1)
         else:
+            mask = block_idx_h < j * k
             w = tl.load(w_ptrs, mask=mask[None, :], other=0.0)
             a_block = tl.load(a_ptrs + a_offs1, mask=mask[:, None], other=float("-inf"))
         b_block = tl.load(b_ptrs + b_offs1)
@@ -419,6 +419,7 @@ def _ker_lt2exp_split(
     cur_log_c = tl.load(c_ptrs, mask=c_mask, other=float("-inf"))
     log_c = a_max_block + b_max_block + tl.log(acc + tl.exp(cur_log_c - a_max_block - b_max_block))
     tl.store(c_ptrs, log_c, mask=c_mask)
+    # Ensure all threads have finished before releasing the lock
     tl.debug_barrier()
     tl.atomic_xchg(lock_ptr, 0, sem="release")
 
