@@ -171,6 +171,8 @@ def _ker_mm(
     # Store the block accumulator, and use masks
     c_offs0 = pid_i * BLOCK_SIZE + block_idx
     c_offs1 = pid_j * BLOCK_SIZE + block_idx
+    c_offs0 = tl.max_contiguous(c_offs0, BLOCK_SIZE)
+    c_offs1 = tl.max_contiguous(c_offs1, BLOCK_SIZE)
     c_ptrs = c_ptr + c_offs0[:, None] * c_str0 + c_offs1[None, :] * c_str1
     c_mask = (c_offs0 < m)[:, None] & (c_offs1 < n)[None, :]
     tl.store(c_ptrs, acc, mask=c_mask)

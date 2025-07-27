@@ -1,4 +1,3 @@
-import itertools
 from typing import Any, cast
 
 import torch
@@ -9,67 +8,67 @@ from triturus.utils import is_triturus_tf32_enabled
 
 CONFIGS = [
     triton.Config(
-        {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=5,
         num_warps=1,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=5,
         num_warps=1,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=5,
         num_warps=1,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INNER": 16, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INNER": 16, "GROUP_SIZE": 4},
         num_stages=6,
         num_warps=1,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=6,
         num_warps=1,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 16, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 16, "GROUP_SIZE": 4},
         num_stages=5,
         num_warps=2,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=4,
         num_warps=2,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=4,
         num_warps=4,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=5,
         num_warps=4,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=4,
         num_warps=8,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 64, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 64, "GROUP_SIZE": 4},
         num_stages=4,
         num_warps=8,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=3,
         num_warps=8,
     ),
     triton.Config(
-        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 64, "GROUP_SIZE": 8},
+        {"BLOCK_SIZE_M": 256, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_INNER": 64, "GROUP_SIZE": 4},
         num_stages=3,
         num_warps=8,
     ),
@@ -199,6 +198,8 @@ def _ker_lt2exp(
     # Store the block accumulator, and use masks
     c_offs1 = pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     c_offs2 = pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    c_offs1 = tl.max_contiguous(c_offs1, BLOCK_SIZE_M)
+    c_offs2 = tl.max_contiguous(c_offs2, BLOCK_SIZE_N)
     c_ptrs = c_ptr + pid_batch * c_str0 + c_offs1[:, None] * c_str1 + c_offs2[None, :] * c_str2
     c_mask = (c_offs1 < m)[:, None] & (c_offs2 < n)[None, :]
     tl.store(c_ptrs, log_acc, mask=c_mask)
@@ -257,9 +258,29 @@ def lt2exp(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return c
 
 
+CONFIGS_SPLIT = [
+    *tuple(
+        triton.Config(
+            {
+                "BLOCK_SIZE_M": bs,
+                "BLOCK_SIZE_N": bs,
+                "BLOCK_SIZE_INNER": bsi,
+                "GROUP_SIZE": 4,
+                "NUM_SPLITS": ns,
+            },
+            num_stages=4,
+            num_warps=4,
+        )
+        for ns in [4, 8, 16]
+        for bsi in [16, 32]
+        for bs in [16, 32]
+    )
+]
+
+
 @triton.autotune(
-    configs=CONFIGS,
-    key=["batch", "m", "j", "k", "n", "NUM_BLOCKS", "ALLOW_TF32"],
+    configs=CONFIGS_SPLIT,
+    key=["batch", "m", "j", "k", "n", "NUM_SPLITS", "ALLOW_TF32"],
 )
 @triton.jit
 def _ker_lt2exp_split(
@@ -267,8 +288,10 @@ def _ker_lt2exp_split(
     a_ptr,  # A pointer to a batch x J x N tensor (A)
     b_ptr,  # A pointer to a batch x K x N tensor (B)
     c_ptr,  # A pointer to a batch x M x N tensor (C)
-    a_max_ptr,  # The maximum values of A along axis=1 (A_max), i.e., a batch x N matrix
-    b_max_ptr,  # The maximum values of B along axis=1 (B_max), i.e., a batch x N matrix
+    lock_ptr,
+    l_str0,
+    l_str1,
+    l_str2,
     w_str0,  # The stride of W along axis=0
     w_str1,  # The stride of W along axis=1
     w_str2,  # The stride of W along axis=2
@@ -281,10 +304,6 @@ def _ker_lt2exp_split(
     c_str0,  # The stride of C along axis=0
     c_str1,  # The stride of C along axis=1
     c_str2,  # The stride of C along axis=2
-    a_max_str0,  # The stride of A_max along axis=0
-    a_max_str1,  # The stride of A_max along axis=1
-    b_max_str0,  # The stride of B_max along axis=0
-    b_max_str1,  # The stride of B_max along axis=1
     batch: int,
     m: int,
     j: int,
@@ -294,10 +313,13 @@ def _ker_lt2exp_split(
     BLOCK_SIZE_N: tl.constexpr,  # The block size along axis=2 of A (or B)
     BLOCK_SIZE_INNER: tl.constexpr,  # The block size along the dimension to contract
     GROUP_SIZE: tl.constexpr,  # The group size used for swizzling
-    NUM_BLOCKS: tl.constexpr,  # The number of block dot products each program computes
+    NUM_SPLITS: tl.constexpr,  # The number of splits
+    A_TILE_SIZE: tl.constexpr,  # The size of a tile column of A, i.e., next_power_of_2(j)
+    B_TILE_SIZE: tl.constexpr,  # The size of a tile column of B, i.e., next_power_of_2(k)
     ALLOW_TF32: tl.constexpr,  # Whether to allow tf32
 ):
     PRECISION: tl.constexpr = "tf32" if ALLOW_TF32 else "ieee"
+    INTERLEAVED_TILE_SIZE: tl.constexpr = NUM_SPLITS * BLOCK_SIZE_INNER
     # Retrieve the program ids on a 4D grid
     pid = tl.program_id(axis=0)
     num_programs = tl.num_programs(axis=0)
@@ -308,17 +330,19 @@ def _ker_lt2exp_split(
     pid_i = (pid % num_programs12) // num_programs2
     pid_j = (pid % num_programs12) % num_programs2
     pid_i, pid_j = tl.swizzle2d(pid_i, pid_j, num_programs1, num_programs2, GROUP_SIZE)
-    pid_k = tl.program_id(axis=1)
-    num_programs_inn = tl.num_programs(axis=1)
+    pid_inn = tl.program_id(axis=1)
     # Some hints to the compiler
     tl.assume(pid_batch >= 0)
     tl.assume(pid_i >= 0)
     tl.assume(pid_j >= 0)
-    tl.assume(pid_k >= 0)
+    tl.assume(pid_inn >= 0)
     tl.assume(m > 0)
     tl.assume(j > 0)
     tl.assume(k > 0)
     tl.assume(n > 0)
+    tl.assume(l_str0 > 0)
+    tl.assume(l_str1 > 0)
+    tl.assume(l_str2 > 0)
     tl.assume(w_str0 > 0)
     tl.assume(w_str1 > 0)
     tl.assume(w_str2 > 0)
@@ -331,42 +355,45 @@ def _ker_lt2exp_split(
     tl.assume(c_str0 > 0)
     tl.assume(c_str1 > 0)
     tl.assume(c_str2 > 0)
-    tl.assume(a_max_str0 > 0)
-    tl.assume(a_max_str1 > 0)
-    tl.assume(b_max_str0 > 0)
-    tl.assume(b_max_str1 > 0)
     # Move the pointers based on the batch program id,
     # and based on the offsets for W, A, B, C
     block_idx1 = tl.arange(0, BLOCK_SIZE_M)
     block_idx2 = tl.arange(0, BLOCK_SIZE_N)
-    interleaved_chunk_size = num_programs_inn * BLOCK_SIZE_INNER
-    block_idx = pid_k * BLOCK_SIZE_INNER + tl.arange(0, BLOCK_SIZE_INNER)
+    block_idx = pid_inn * BLOCK_SIZE_INNER + tl.arange(0, BLOCK_SIZE_INNER)
     block_idx = tl.max_contiguous(block_idx, BLOCK_SIZE_INNER)
     w_offs1 = (pid_i * BLOCK_SIZE_M + block_idx1) % m
     ab_offs2 = (pid_j * BLOCK_SIZE_N + block_idx2) % n
     w_ptrs = w_ptr + pid_batch * w_str0 + w_offs1[:, None] * w_str1 + block_idx[None, :] * w_str2
     a_ptrs = a_ptr + pid_batch * a_str0 + ab_offs2[None, :] * a_str2
     b_ptrs = b_ptr + pid_batch * b_str0 + ab_offs2[None, :] * b_str2
-    a_max_ptrs = a_max_ptr + pid_batch * a_max_str0 + ab_offs2 * a_max_str1
-    b_max_ptrs = b_max_ptr + pid_batch * b_max_str0 + ab_offs2 * b_max_str1
-    # Load the maximum blocks of A and B, and clamp them to avoid infinities
-    a_max_block = tl.clamp(tl.load(a_max_ptrs), -1e38, 1e38)
-    b_max_block = tl.clamp(tl.load(b_max_ptrs), -1e38, 1e38)
+    # Compute the maximum values of the column tiles of A
+    a_tile_idx = tl.arange(0, A_TILE_SIZE) % j
+    a_tile = tl.load(a_ptrs + a_tile_idx[:, None] * a_str1)
+    a_max_block = tl.clamp(tl.max(a_tile, axis=0), -1e38, 1e38)
+    # Compute the maximum values of the column tiles of B
+    b_tile_idx = tl.arange(0, B_TILE_SIZE) % k
+    b_tile = tl.load(b_ptrs + b_tile_idx[:, None] * b_str1)
+    b_max_block = tl.clamp(tl.max(b_tile, axis=0), -1e38, 1e38)
     # Instantiate the accumulator
     acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     # Compute and accumulate the dot products of block matrices
-    for h in range(NUM_BLOCKS):
-        block_idx_h = block_idx + h * interleaved_chunk_size
+    num_blocks = tl.cdiv(j * k, INTERLEAVED_TILE_SIZE)
+    for h in range(num_blocks):
+        block_idx_h = block_idx + h * INTERLEAVED_TILE_SIZE
         block_idx_h = tl.max_contiguous(block_idx_h, BLOCK_SIZE_INNER)
         # Load the weights, and handle out of bounds using masks
         mask = block_idx_h < j * k
-        w = tl.load(w_ptrs, mask=mask[None, :], other=0.0)
         # Load the values of A and B, and handle out of bounds using masks
         a_block_idx = block_idx_h // k
         b_block_idx = block_idx_h % k
         a_offs1 = a_block_idx[:, None] * a_str1
         b_offs1 = b_block_idx[:, None] * b_str1
-        a_block = tl.load(a_ptrs + a_offs1, mask=mask[:, None], other=float("-inf"))
+        if h < num_blocks - 1:
+            w = tl.load(w_ptrs)
+            a_block = tl.load(a_ptrs + a_offs1)
+        else:
+            w = tl.load(w_ptrs, mask=mask[None, :], other=0.0)
+            a_block = tl.load(a_ptrs + a_offs1, mask=mask[:, None], other=float("-inf"))
         b_block = tl.load(b_ptrs + b_offs1)
         # Exponentiate the values in the A and B matrices ...
         # ... but first subtract the maximum values for numerical stability
@@ -380,94 +407,30 @@ def _ker_lt2exp_split(
             input_precision=PRECISION,
         )
         # Move the pointers for B along axis=2 by the block size
-        w_ptrs += interleaved_chunk_size * w_str2
+        w_ptrs += INTERLEAVED_TILE_SIZE * w_str2
     # Atomically add the accumulated results
-    # Here we are using the 'relaxed' semantic (which is the fastest), because in this case
-    # we do not care about the ordering of the previous operations or the ordering of atomic sum operations
-    c_offs1 = pid_i * BLOCK_SIZE_M + block_idx1
-    c_offs2 = pid_j * BLOCK_SIZE_N + block_idx2
-    c_ptrs = c_ptr + pid_batch * c_str0 + c_offs1[:, None] * c_str1 + c_offs2[None, :] * c_str2
+    c_offs1 = pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+    c_offs2 = pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_mask = (c_offs1 < m)[:, None] & (c_offs2 < n)[None, :]
-    tl.atomic_add(c_ptrs, acc, mask=c_mask, sem="relaxed")
-
-
-# The hook used to fill the output tensor with zeros
-def _ker_lt2exp_split_zeros_(*args: Any, **_: Any) -> None:
-    c = cast(torch.Tensor, args[3])
-    c.zero_()
-
-
-# Add the above hook to the lt2exp split kernel
-_ker_lt2exp_split.fn.add_pre_run_hook(_ker_lt2exp_split_zeros_)
-
-
-@triton.autotune(
-    configs=[
-        triton.Config(
-            {"BLOCK_SIZE_M": bs, "BLOCK_SIZE_N": bs, "GROUP_SIZE": 8},
-            num_warps=nw,
-        )
-        for bs, nw in itertools.product([32, 64, 128], [1, 2, 4])
-    ],
-    key=["batch", "m", "n"],
-    restore_value=["c_ptr"],
-)
-@triton.jit
-def _ker_lt2exp_log_add_max(
-    c_ptr,  # A pointer to a batch x M x N tensor (C)
-    a_max_ptr,  # The maximum values of A along axis=1 (A_max), i.e., a batch x N matrix
-    b_max_ptr,  # The maximum values of B along axis=1 (B_max), i.e., a batch x N matrix
-    c_str0,  # The stride of C along axis=0
-    c_str1,  # The stride of C along axis=1
-    c_str2,  # The stride of C along axis=2
-    a_max_str0,  # The stride of A_max along axis=0
-    a_max_str1,  # The stride of A_max along axis=1
-    b_max_str0,  # The stride of B_max along axis=0
-    b_max_str1,  # The stride of B_max along axis=1
-    batch: int,
-    m: int,
-    n: int,
-    BLOCK_SIZE_M: tl.constexpr,  # The block size along axis=1 of W
-    BLOCK_SIZE_N: tl.constexpr,  # The block size along axis=2 of A (or B)
-    GROUP_SIZE: tl.constexpr,  # The group size used for swizzling
-):
-    # Retrieve the program ids on a 3D grid
-    pid = tl.program_id(axis=0)
-    num_programs = tl.num_programs(axis=0)
-    num_programs12 = num_programs // batch
-    num_programs1 = tl.cdiv(m, BLOCK_SIZE_M)
-    num_programs2 = num_programs12 // num_programs1
-    pid_batch = pid // num_programs12
-    pid_i = (pid % num_programs12) // num_programs2
-    pid_j = (pid % num_programs12) % num_programs2
-    pid_i, pid_j = tl.swizzle2d(pid_i, pid_j, num_programs1, num_programs2, GROUP_SIZE)
-    # Some hints to the compiler
-    tl.assume(pid_batch >= 0)
-    tl.assume(pid_i >= 0)
-    tl.assume(pid_j >= 0)
-    tl.assume(m > 0)
-    tl.assume(n > 0)
-    tl.assume(c_str0 > 0)
-    tl.assume(c_str1 > 0)
-    tl.assume(c_str2 > 0)
-    tl.assume(a_max_str0 > 0)
-    tl.assume(a_max_str1 > 0)
-    tl.assume(b_max_str0 > 0)
-    tl.assume(b_max_str1 > 0)
-    # Compute the offsets of the block of C to operate on
-    c_offs1 = (pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % m
-    c_offs2 = (pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % n
-    # Load the maximum blocks of A and B, using masks
-    a_max_ptrs = a_max_ptr + pid_batch * a_max_str0 + c_offs2 * a_max_str1
-    b_max_ptrs = b_max_ptr + pid_batch * b_max_str0 + c_offs2 * b_max_str1
-    a_max_block = tl.load(a_max_ptrs)
-    b_max_block = tl.load(b_max_ptrs)
-    # Load the block of C, compute its logarithm and add back the maximum values of A and B
     c_ptrs = c_ptr + pid_batch * c_str0 + c_offs1[:, None] * c_str1 + c_offs2[None, :] * c_str2
-    c_block = tl.load(c_ptrs)
-    c_block = a_max_block + b_max_block + tl.log(c_block)
-    # Store the results back to C (this is an in-place kernel)
-    tl.store(c_ptrs, c_block)
+    lock_ptr += pid_batch * l_str0 + pid_i * l_str1 + pid_j * l_str2
+    while tl.atomic_cas(lock_ptr, 0, 1, sem="acquire") == 1:
+        pass
+    cur_log_c = tl.load(c_ptrs, mask=c_mask, other=float("-inf"))
+    log_c = a_max_block + b_max_block + tl.log(acc + tl.exp(cur_log_c - a_max_block - b_max_block))
+    tl.store(c_ptrs, log_c, mask=c_mask)
+    tl.debug_barrier()
+    tl.atomic_xchg(lock_ptr, 0, sem="release")
+
+
+def _ker_lt2exp_split_prepare(*args: Any, **_: Any) -> None:
+    c = cast(torch.Tensor, args[3])
+    lock = cast(torch.Tensor, args[4])
+    c.fill_(float("-inf"))
+    lock.zero_()
+
+
+_ker_lt2exp_split.fn.add_pre_run_hook(_ker_lt2exp_split_prepare)
 
 
 def lt2exp_split(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -481,19 +444,24 @@ def lt2exp_split(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Ten
     assert w.device == a.device == b.device
     batch, m, j, k, n = w.shape[0], w.shape[1], w.shape[2], w.shape[3], a.shape[2]
 
-    # Compute the maximums of A and B along axis=1
-    a_max = torch.amax(a, dim=1)
-    b_max = torch.amax(b, dim=1)
+    # Allocate the lock
+    MIN_BLOCK_SIZE = 32
+    lock = torch.empty(
+        batch,
+        triton.cdiv(m, MIN_BLOCK_SIZE),
+        triton.cdiv(n, MIN_BLOCK_SIZE),
+        dtype=torch.int32,
+        device=a.device,
+    )
     # Allocate the result tensor, on the same device
-    c = torch.empty((batch, m, n), dtype=a.dtype, device=a.device)
-    # Make each program computes a relatively small number of blocks, if no batch dimension
-    # Otherwise, increase the number of block dot products computed by each program
-    # This is because the batch dimension already increases the number of programs (see below)
-    NUM_BLOCKS = 32 if batch == 1 else 128
+    c = torch.empty(batch, m, n, dtype=a.dtype, device=a.device)
     grid = lambda meta: (
         batch * triton.cdiv(m, meta["BLOCK_SIZE_M"]) * triton.cdiv(n, meta["BLOCK_SIZE_N"]),
-        triton.cdiv(j * k, meta["BLOCK_SIZE_INNER"] * NUM_BLOCKS),
+        meta["NUM_SPLITS"],
     )
+    # Compute the tile sizes, which will be used to compute the maximum along multiple block columns in A and B
+    a_tile_size = triton.next_power_of_2(j)
+    b_tile_size = triton.next_power_of_2(k)
     # Reshape the weights tensor as to flatten the last two dimensions
     w = w.view(batch, m, -1)
     # Launch the kernel to compute the exponentiated dot products
@@ -503,8 +471,10 @@ def lt2exp_split(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Ten
         a,
         b,
         c,
-        a_max,
-        b_max,
+        lock,
+        lock.stride(0),
+        lock.stride(1),
+        lock.stride(2),
         w.stride(0),
         w.stride(1),
         w.stride(2),
@@ -517,35 +487,13 @@ def lt2exp_split(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Ten
         c.stride(0),
         c.stride(1),
         c.stride(2),
-        a_max.stride(0),
-        a_max.stride(1),
-        b_max.stride(0),
-        b_max.stride(1),
         batch,
         m,
         j,
         k,
         n,
-        NUM_BLOCKS=NUM_BLOCKS,
+        A_TILE_SIZE=a_tile_size,
+        B_TILE_SIZE=b_tile_size,
         ALLOW_TF32=allow_tf32,
-    )
-    # Launch the kernel to compute the elementwise logarithm of C and add back the maximums to it
-    grid = lambda meta: (
-        batch * triton.cdiv(m, meta["BLOCK_SIZE_M"]) * triton.cdiv(n, meta["BLOCK_SIZE_N"]),
-    )
-    _ker_lt2exp_log_add_max[grid](
-        c,
-        a_max,
-        b_max,
-        c.stride(0),
-        c.stride(1),
-        c.stride(2),
-        a_max.stride(0),
-        a_max.stride(1),
-        b_max.stride(0),
-        b_max.stride(1),
-        batch,
-        m,
-        n,
     )
     return c
