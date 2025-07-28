@@ -8,7 +8,7 @@ from baselines.lt2exp import lt2exp_einsum as torch_lt2exp_einsum
 from baselines.lt2exp import lt2exp_einsum_jit as torch_jit_lt2exp_einsum
 from baselines.lt2exp import lt2exp_jit as torch_jit_lt2exp
 from benchmarks.utils import QUANTILES, eval_gbps
-from triturus.lt2exp import lt2exp, lt2exp_split
+from triturus.lt2exp import lt2exp
 from triturus.utils import ensure_reproducibility, set_tf32_enabled
 
 
@@ -18,7 +18,6 @@ class Providers:
     TORCH_JIT = "torch (jit)"
     TORCH_JIT_EINSUM = "torch (jit, einsum)"
     TRITURUS = "triturus"
-    TRITURUS_SPLIT = "triturus (split)"
 
 
 PROVIDERS = [
@@ -27,7 +26,6 @@ PROVIDERS = [
     Providers.TORCH_JIT,
     Providers.TORCH_JIT_EINSUM,
     Providers.TRITURUS,
-    Providers.TRITURUS_SPLIT,
 ]
 
 
@@ -35,7 +33,7 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "j", "k", "n"],
-            x_vals=[32, 64, 128, 256, 512],
+            x_vals=[64, 128, 256, 512],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
@@ -44,12 +42,12 @@ CONFIGS = [
             plot_name=f"lt2exp (square matrices, batch={1} allow_tf32={allow_tf32})",
             args={"batch": 1, "allow_tf32": allow_tf32},
         )
-        for allow_tf32 in [True]
+        for allow_tf32 in [False, True]
     ),
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "j", "k"],
-            x_vals=[32, 64, 128, 256],
+            x_vals=[64, 128, 256],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
@@ -58,9 +56,9 @@ CONFIGS = [
             plot_name=f"lt2exp (rectangular matrices, n={n} batch={batch} allow_tf32={allow_tf32})",
             args={"n": n, "batch": batch, "allow_tf32": allow_tf32},
         )
-        for batch in [4, 16, 32, 64]
+        for batch in [16, 32, 64, 128]
         for n in [256]
-        for allow_tf32 in [True]
+        for allow_tf32 in [False, True]
     ),
 ]
 
@@ -86,8 +84,6 @@ def benchmark_lt2exp(
             fn = lambda: torch_jit_lt2exp_einsum(w, a, b)
         case Providers.TRITURUS:
             fn = lambda: lt2exp(w, a, b)
-        case Providers.TRITURUS_SPLIT:
-            fn = lambda: lt2exp_split(w, a, b)
         case _:
             assert False, provider
     ms, min_ms, max_ms = triton.testing.do_bench(fn, warmup=200, rep=1500, quantiles=QUANTILES)

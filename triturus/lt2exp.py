@@ -6,7 +6,7 @@ import triton.language as tl
 
 from triturus.utils import is_triturus_tf32_enabled
 
-CONFIGS = [
+CONFIGS_UNSPLIT = [
     triton.Config(
         {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_INNER": 32, "GROUP_SIZE": 4},
         num_stages=5,
@@ -75,9 +75,156 @@ CONFIGS = [
 ]
 
 
-@triton.autotune(configs=CONFIGS, key=["batch", "m", "j", "k", "n", "ALLOW_TF32"])
+CONFIGS_SPLIT = [
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_N": 16,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 2,
+        },
+        num_stages=6,
+        num_warps=2,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_N": 16,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 4,
+        },
+        num_stages=6,
+        num_warps=2,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_N": 16,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 8,
+        },
+        num_stages=6,
+        num_warps=2,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 32,
+            "BLOCK_SIZE_N": 32,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 2,
+        },
+        num_stages=5,
+        num_warps=4,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 32,
+            "BLOCK_SIZE_N": 32,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 4,
+        },
+        num_stages=5,
+        num_warps=4,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 32,
+            "BLOCK_SIZE_N": 32,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 8,
+        },
+        num_stages=5,
+        num_warps=4,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 64,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 2,
+        },
+        num_stages=4,
+        num_warps=8,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 64,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 4,
+        },
+        num_stages=4,
+        num_warps=8,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 64,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 8,
+        },
+        num_stages=4,
+        num_warps=8,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 64,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 12,
+        },
+        num_stages=4,
+        num_warps=8,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 128,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 4,
+        },
+        num_stages=2,
+        num_warps=8,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 128,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 8,
+        },
+        num_stages=2,
+        num_warps=8,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 128,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_INNER": 32,
+            "GROUP_SIZE": 4,
+            "NUM_SPLITS": 12,
+        },
+        num_stages=2,
+        num_warps=8,
+    ),
+]
+
+
+@triton.autotune(configs=CONFIGS_UNSPLIT, key=["batch", "m", "j", "k", "n", "ALLOW_TF32"])
 @triton.jit
-def _ker_lt2exp(
+def _ker_lt2exp_unsplit(
     w_ptr,  # A pointer to a batch x M x (J x K) tensor (W)
     a_ptr,  # A pointer to a batch x J x N tensor (A)
     b_ptr,  # A pointer to a batch x K x N tensor (B)
@@ -203,105 +350,6 @@ def _ker_lt2exp(
     c_ptrs = c_ptr + pid_batch * c_str0 + c_offs1[:, None] * c_str1 + c_offs2[None, :] * c_str2
     c_mask = (c_offs1 < m)[:, None] & (c_offs2 < n)[None, :]
     tl.store(c_ptrs, log_acc, mask=c_mask)
-
-
-def lt2exp(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    assert len(w.shape) == 4
-    assert len(a.shape) == len(b.shape) == 3
-    assert w.shape[0] == a.shape[0] == b.shape[0]
-    assert w.shape[2] == a.shape[1]
-    assert w.shape[3] == b.shape[1]
-    assert a.shape[2] == b.shape[2]
-    assert w.dtype == a.dtype == b.dtype == torch.float32
-    assert w.device == a.device == b.device
-    batch, m, j, k, n = w.shape[0], w.shape[1], w.shape[2], w.shape[3], a.shape[2]
-
-    # Allocate the result tensor, on the same device
-    c = torch.empty((batch, m, n), dtype=a.dtype, device=a.device)
-    # Specify how to compute the number of programs required in the grid
-    grid = lambda meta: (
-        batch * triton.cdiv(m, meta["BLOCK_SIZE_M"]) * triton.cdiv(n, meta["BLOCK_SIZE_N"]),
-    )
-    # Compute the tile sizes, which will be used to compute the maximum along multiple block columns in A and B
-    a_tile_size = triton.next_power_of_2(j)
-    b_tile_size = triton.next_power_of_2(k)
-    # Reshape the weights tensor as to flatten the last two dimensions
-    w = w.view(batch, m, -1)
-    # Launch the kernel
-    allow_tf32 = is_triturus_tf32_enabled()
-    _ker_lt2exp[grid](
-        w,
-        a,
-        b,
-        c,
-        w.stride(0),
-        w.stride(1),
-        w.stride(2),
-        a.stride(0),
-        a.stride(1),
-        a.stride(2),
-        b.stride(0),
-        b.stride(1),
-        b.stride(2),
-        c.stride(0),
-        c.stride(1),
-        c.stride(2),
-        batch,
-        m,
-        j,
-        k,
-        n,
-        A_TILE_SIZE=a_tile_size,
-        B_TILE_SIZE=b_tile_size,
-        ALLOW_TF32=allow_tf32,
-    )
-    return c
-
-
-CONFIGS_SPLIT = [
-    *tuple(
-        triton.Config(
-            {
-                "BLOCK_SIZE_M": 16,
-                "BLOCK_SIZE_N": 16,
-                "BLOCK_SIZE_INNER": 32,
-                "GROUP_SIZE": 4,
-                "NUM_SPLITS": ns,
-            },
-            num_stages=6,
-            num_warps=2,
-        )
-        for ns in [2, 4, 8]
-    ),
-    *tuple(
-        triton.Config(
-            {
-                "BLOCK_SIZE_M": 32,
-                "BLOCK_SIZE_N": 32,
-                "BLOCK_SIZE_INNER": 32,
-                "GROUP_SIZE": 4,
-                "NUM_SPLITS": ns,
-            },
-            num_stages=5,
-            num_warps=4,
-        )
-        for ns in [2, 4, 8]
-    ),
-    *tuple(
-        triton.Config(
-            {
-                "BLOCK_SIZE_M": 64,
-                "BLOCK_SIZE_N": 64,
-                "BLOCK_SIZE_INNER": 32,
-                "GROUP_SIZE": 4,
-                "NUM_SPLITS": ns,
-            },
-            num_stages=4,
-            num_warps=8,
-        )
-        for ns in [4, 8, 12]
-    ),
-]
 
 
 @triton.autotune(
@@ -460,7 +508,9 @@ def _ker_lt2exp_split_prepare(*args: Any, **_: Any) -> None:
 _ker_lt2exp_split.fn.add_pre_run_hook(_ker_lt2exp_split_prepare)
 
 
-def lt2exp_split(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+def lt2exp(
+    w: torch.Tensor, a: torch.Tensor, b: torch.Tensor, *, mode: str = "auto"
+) -> torch.Tensor:
     assert len(w.shape) == 4
     assert len(a.shape) == len(b.shape) == 3
     assert w.shape[0] == a.shape[0] == b.shape[0]
@@ -471,37 +521,83 @@ def lt2exp_split(w: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Ten
     assert w.device == a.device == b.device
     batch, m, j, k, n = w.shape[0], w.shape[1], w.shape[2], w.shape[3], a.shape[2]
 
-    # Allocate the lock
-    MIN_BLOCK_SIZE = 16
-    lock = torch.empty(
-        batch,
-        triton.cdiv(m, MIN_BLOCK_SIZE),
-        triton.cdiv(n, MIN_BLOCK_SIZE),
-        dtype=torch.int32,
-        device=a.device,
-    )
+    # Choose wether to launch the split kernel version or not,
+    # by using some heuristic based on the size of the inputs
+    if mode == "auto":
+        launch_split = batch * m * n < 1048576 and j * k > 512
+    elif mode == "split":
+        launch_split = True
+    elif mode == "unsplit":
+        launch_split = False
+    else:
+        raise ValueError(f"Uknown mode '{mode}' for the l2exp kernel")
+
     # Allocate the result tensor, on the same device
-    c = torch.empty(batch, m, n, dtype=a.dtype, device=a.device)
-    grid = lambda meta: (
-        batch * triton.cdiv(m, meta["BLOCK_SIZE_M"]) * triton.cdiv(n, meta["BLOCK_SIZE_N"]),
-        meta["NUM_SPLITS"],
-    )
+    c = torch.empty((batch, m, n), dtype=a.dtype, device=a.device)
     # Compute the tile sizes, which will be used to compute the maximum along multiple block columns in A and B
     a_tile_size = triton.next_power_of_2(j)
     b_tile_size = triton.next_power_of_2(k)
     # Reshape the weights tensor as to flatten the last two dimensions
     w = w.view(batch, m, -1)
-    # Launch the kernel to compute the exponentiated dot products
+    # Retrieve whether to use TF32
     allow_tf32 = is_triturus_tf32_enabled()
-    _ker_lt2exp_split[grid](
+
+    if launch_split:
+        # Allocate the lock
+        MIN_BLOCK_SIZE = 16
+        lock = torch.empty(
+            batch,
+            triton.cdiv(m, MIN_BLOCK_SIZE),
+            triton.cdiv(n, MIN_BLOCK_SIZE),
+            dtype=torch.int32,
+            device=a.device,
+        )
+        # Launch the split kernel version
+        grid = lambda meta: (
+            batch * triton.cdiv(m, meta["BLOCK_SIZE_M"]) * triton.cdiv(n, meta["BLOCK_SIZE_N"]),
+            meta["NUM_SPLITS"],
+        )
+        _ker_lt2exp_split[grid](
+            w,
+            a,
+            b,
+            c,
+            lock,
+            lock.stride(0),
+            lock.stride(1),
+            lock.stride(2),
+            w.stride(0),
+            w.stride(1),
+            w.stride(2),
+            a.stride(0),
+            a.stride(1),
+            a.stride(2),
+            b.stride(0),
+            b.stride(1),
+            b.stride(2),
+            c.stride(0),
+            c.stride(1),
+            c.stride(2),
+            batch,
+            m,
+            j,
+            k,
+            n,
+            A_TILE_SIZE=a_tile_size,
+            B_TILE_SIZE=b_tile_size,
+            ALLOW_TF32=allow_tf32,
+        )
+        return c
+
+    # Launch the unsplit kernel version
+    grid = lambda meta: (
+        batch * triton.cdiv(m, meta["BLOCK_SIZE_M"]) * triton.cdiv(n, meta["BLOCK_SIZE_N"]),
+    )
+    _ker_lt2exp_unsplit[grid](
         w,
         a,
         b,
         c,
-        lock,
-        lock.stride(0),
-        lock.stride(1),
-        lock.stride(2),
         w.stride(0),
         w.stride(1),
         w.stride(2),
