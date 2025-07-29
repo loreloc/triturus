@@ -287,12 +287,17 @@ def _ker_lt2exp_unsplit(
     # Compute the number of blocks to multiply and accumulate, and the block indices
     num_blocks = tl.cdiv(j * k, BLOCK_SIZE_INNER)
     block_idx = tl.arange(0, BLOCK_SIZE_INNER)
+    block_idx1 = tl.arange(0, BLOCK_SIZE_M)
+    block_idx2 = tl.arange(0, BLOCK_SIZE_N)
     # Compute the pointers to the starting blocks of W (along axis=1)
     w_offs1 = (pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % m
     # Compute the pointers to the starting blocks of A and B (along axis=2 for both)
     ab_offs2 = (pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % n
     # Move the pointers based on the batch program id,
     # and based on the offsets for W, A, B, C
+    w_str0 = w_str0.to(
+        tl.int64
+    )  # Upcasting stride of W along axis=0 as to avoid overflow in W elements indexing
     w_ptrs = w_ptr + pid_batch * w_str0 + w_offs1[:, None] * w_str1 + block_idx[None, :] * w_str2
     a_ptrs = a_ptr + pid_batch * a_str0 + ab_offs2[None, :] * a_str2
     b_ptrs = b_ptr + pid_batch * b_str0 + ab_offs2[None, :] * b_str2
@@ -343,8 +348,8 @@ def _ker_lt2exp_unsplit(
     # Compute the logarithm of the accumulator, and add the maximum values back
     log_acc = a_max_block + b_max_block + tl.log(acc)
     # Store the block accumulator, and use masks
-    c_offs1 = pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    c_offs2 = pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    c_offs1 = pid_i * BLOCK_SIZE_M + block_idx1
+    c_offs2 = pid_j * BLOCK_SIZE_N + block_idx2
     c_offs1 = tl.max_contiguous(c_offs1, BLOCK_SIZE_M)
     c_offs2 = tl.max_contiguous(c_offs2, BLOCK_SIZE_N)
     c_ptrs = c_ptr + pid_batch * c_str0 + c_offs1[:, None] * c_str1 + c_offs2[None, :] * c_str2
@@ -437,6 +442,9 @@ def _ker_lt2exp_split(
     block_idx = tl.max_contiguous(block_idx, BLOCK_SIZE_INNER)
     w_offs1 = (pid_i * BLOCK_SIZE_M + block_idx1) % m
     ab_offs2 = (pid_j * BLOCK_SIZE_N + block_idx2) % n
+    w_str0 = w_str0.to(
+        tl.int64
+    )  # Upcasting stride of W along axis=0 as to avoid overflow in W elements indexing
     w_ptrs = w_ptr + pid_batch * w_str0 + w_offs1[:, None] * w_str1 + block_idx[None, :] * w_str2
     a_ptrs = a_ptr + pid_batch * a_str0 + ab_offs2[None, :] * a_str2
     b_ptrs = b_ptr + pid_batch * b_str0 + ab_offs2[None, :] * b_str2
@@ -483,8 +491,8 @@ def _ker_lt2exp_split(
         # Move the pointers for B along axis=2 by the block size
         w_ptrs += INTERLEAVED_TILE_SIZE * w_str2
     # Atomically add the accumulated results
-    c_offs1 = pid_i * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    c_offs2 = pid_j * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    c_offs1 = pid_i * BLOCK_SIZE_M + block_idx1
+    c_offs2 = pid_j * BLOCK_SIZE_N + block_idx2
     c_mask = (c_offs1 < m)[:, None] & (c_offs2 < n)[None, :]
     c_ptrs = c_ptr + pid_batch * c_str0 + c_offs1[:, None] * c_str1 + c_offs2[None, :] * c_str2
     lock_ptr += pid_batch * l_str0 + pid_i * l_str1 + pid_j * l_str2
