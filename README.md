@@ -14,12 +14,13 @@ The following table describes the implemented kernels.
 
 ## Benchmarks Gallery
 
-| Kernel ID    | Benchmark Description                                   | Baselines   | Results                      |
-| ------------ | ------------------------------------------------------- | ----------- | ---------------------------- |
-| vmax         | Vector maximum with and without indices                 | torch       | [here](#benchmark-of-vmax)   |
-| matmax       | Matrix maximum along rows and columns                   | torch       | [here](#benchmark-of-matmax) |
-| mm           | Matrix multiplication with square matrices              | torch       | [here](#benchmark-of-mm)     |
-| lm2exp       | Batch log-matmul, square and rectangular batch matrices | torch + jit | [here](#benchmark-of-lm2exp) |
+| Kernel ID    | Benchmark Description                                    | Baselines   | Results                      |
+| ------------ | -------------------------------------------------------- | ----------- | ---------------------------- |
+| vmax         | Vector maximum with and without indices                  | torch       | [here](#benchmark-of-vmax)   |
+| matmax       | Matrix maximum along rows and columns                    | torch       | [here](#benchmark-of-matmax) |
+| mm           | Matrix multiplication with square matrices               | torch       | [here](#benchmark-of-mm)     |
+| lm2exp       | Batch log-matmul, square and rectangular batch matrices  | torch + jit | [here](#benchmark-of-lm2exp) |
+| lt2exp       | Batch log-Tucker2, square and rectangular batch matrices | torch + jit | [here](#benchmark-of-lt2exp) |
 
 ---
 
@@ -38,3 +39,7 @@ The following table describes the implemented kernels.
 ### Benchmark of lm2exp
 
 <img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-lm2exp.png" alt="lm2exp" height=256px>
+
+### Benchmark of lt2exp
+
+<img src="https://github.com/loreloc/triturus/releases/download/v0.1/benchmark-lt2exp.png" alt="lt2exp" height=256px>
