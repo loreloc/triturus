@@ -33,7 +33,7 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "j", "k", "n"],
-            x_vals=[64, 128, 256, 512],
+            x_vals=[16, 32, 64, 128, 256, 512],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
@@ -47,7 +47,7 @@ CONFIGS = [
     *tuple(
         triton.testing.Benchmark(
             x_names=["m", "j", "k"],
-            x_vals=[64, 128, 256],
+            x_vals=[16, 32, 64, 128, 256],
             x_log=True,
             line_arg="provider",
             line_vals=PROVIDERS,
@@ -56,7 +56,7 @@ CONFIGS = [
             plot_name=f"lt2exp (rectangular matrices, n={n} batch={batch} allow_tf32={allow_tf32})",
             args={"n": n, "batch": batch, "allow_tf32": allow_tf32},
         )
-        for batch in [16, 32, 64, 128]
+        for batch in [32, 128]
         for n in [256]
         for allow_tf32 in [False, True]
     ),
